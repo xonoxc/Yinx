@@ -1,0 +1,16 @@
+[package]
+name = "yinx-http"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+yinx-core = { path = "../yinx-core" }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }

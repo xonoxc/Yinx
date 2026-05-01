@@ -1,0 +1,17 @@
+[package]
+name = "yinx-workflow"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+yinx-core = { path = "../yinx-core" }
+yinx-http = { path = "../yinx-http" }
+yinx-storage = { path = "../yinx-storage" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }

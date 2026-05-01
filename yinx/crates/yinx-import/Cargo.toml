@@ -1,0 +1,14 @@
+[package]
+name = "yinx-import"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+yinx-core = { path = "../yinx-core" }
+yinx-http = { path = "../yinx-http" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+tracing = { workspace = true }
