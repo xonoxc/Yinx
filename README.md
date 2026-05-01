@@ -1,13 +1,15 @@
 # Yinx
 
+![Yinx Mascot](public/mascot.png)
+
 A terminal HTTP client with streaming support, workflow orchestration, and import capabilities. Built in Rust with a Ratatui TUI.
 
-> **Status**: Early development. Phase 1 (Core Domain Types) is complete.
+> **Status**: Early development. Phase 1 (Core Domain Types) and Phase 2 (HTTP Engine Basics) are complete.
 
 ## Features
 
 - [x] **Core Domain Types** -- Request, Response, Timing, and State models with full serialization
-- [ ] **HTTP Engine** -- Async client with streaming, timeouts, and auth
+- [x] **HTTP Engine** -- Async client with streaming, timeouts, auth, and cookie support (21 tests)
 - [ ] **Streaming Engine** -- Chunked, SSE, and JSON streaming with live rendering
 - [ ] **Import System** -- Curl, Postman, Insomnia, and OpenAPI parsers
 - [ ] **Workflow Engine** -- Graph-based request chaining with variable extraction
@@ -20,12 +22,13 @@ A terminal HTTP client with streaming support, workflow orchestration, and impor
 ```
 ├── crates/
 │   ├── yinx-core/       [done] Domain types, state, events (135 tests)
-│   ├── yinx-http/       [todo] HTTP client + streaming engine
+│   ├── yinx-http/       [done] HTTP client + streaming engine (21 tests)
 │   ├── yinx-workflow/   [todo] Graph-based workflow engine
 │   ├── yinx-storage/    [todo] Persistence (JSON/SQLite)
 │   ├── yinx-import/     [todo] Postman/Insomnia/curl/OpenAPI parsers
 │   ├── yinx-tui/        [todo] Ratatui UI layer
 │   └── yinx-cli/        [todo] CLI without TUI
+├── public/              [done] Assets (mascot, etc.)
 ├── src/                 [todo] Main binary (glue)
 └── Cargo.toml           Workspace root
 ```
@@ -56,7 +59,7 @@ cargo fmt
 |-------|-------------|--------|
 | 0 | Project Scaffolding | Done |
 | 1 | Core Domain Types | Done |
-| 2 | HTTP Engine Basics | Pending |
+| 2 | HTTP Engine Basics | Done |
 | 3 | Storage Layer | Pending |
 | 4 | Streaming Engine | Pending |
 | 5 | Import System | Pending |
