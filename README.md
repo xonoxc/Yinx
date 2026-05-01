@@ -1,4 +1,4 @@
-# Yinx <img src="public/mascot.png" alt="🦀" height="32" style="vertical-align: middle">
+# Yinx <img src="public/mascot.png" alt="🦀" height="102" style="vertical-align: middle">
 
 A terminal HTTP client with streaming support, workflow orchestration, and import capabilities. Built in Rust with a Ratatui TUI.
 
