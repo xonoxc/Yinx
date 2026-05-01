@@ -6,28 +6,28 @@ A terminal HTTP client with streaming support, workflow orchestration, and impor
 
 ## Features
 
-- [x] **Core Domain Types** — Request, Response, Timing, and State models with full serialization
-- [ ] **HTTP Engine** — Async client with streaming, timeouts, and auth
-- [ ] **Streaming Engine** — Chunked, SSE, and JSON streaming with live rendering
-- [ ] **Import System** — Curl, Postman, Insomnia, and OpenAPI parsers
-- [ ] **Workflow Engine** — Graph-based request chaining with variable extraction
-- [ ] **TUI** — Full terminal UI with vim-style navigation
-- [ ] **CLI** — Scriptable command-line interface
-- [ ] **Time-Travel** — Response timeline scrubbing and replay
+- [x] **Core Domain Types** -- Request, Response, Timing, and State models with full serialization
+- [ ] **HTTP Engine** -- Async client with streaming, timeouts, and auth
+- [ ] **Streaming Engine** -- Chunked, SSE, and JSON streaming with live rendering
+- [ ] **Import System** -- Curl, Postman, Insomnia, and OpenAPI parsers
+- [ ] **Workflow Engine** -- Graph-based request chaining with variable extraction
+- [ ] **TUI** -- Full terminal UI with vim-style navigation
+- [ ] **CLI** -- Scriptable command-line interface
+- [ ] **Time-Travel** -- Response timeline scrubbing and replay
 
 ## Project Structure
 
 ```
 yinx/
 ├── crates/
-│   ├── yinx-core/       ✅ Domain types, state, events (135 tests)
-│   ├── yinx-http/       ⏳ HTTP client + streaming engine
-│   ├── yinx-workflow/   ⏳ Graph-based workflow engine
-│   ├── yinx-storage/    ⏳ Persistence (JSON/SQLite)
-│   ├── yinx-import/     ⏳ Postman/Insomnia/curl/OpenAPI parsers
-│   ├── yinx-tui/        ⏳ Ratatui UI layer
-│   └── yinx-cli/        ⏳ CLI without TUI
-├── yinx/                ⏳ Main binary (glue)
+│   ├── yinx-core/       [done] Domain types, state, events (135 tests)
+│   ├── yinx-http/       [todo] HTTP client + streaming engine
+│   ├── yinx-workflow/   [todo] Graph-based workflow engine
+│   ├── yinx-storage/    [todo] Persistence (JSON/SQLite)
+│   ├── yinx-import/     [todo] Postman/Insomnia/curl/OpenAPI parsers
+│   ├── yinx-tui/        [todo] Ratatui UI layer
+│   └── yinx-cli/        [todo] CLI without TUI
+├── yinx/                [todo] Main binary (glue)
 └── Cargo.toml           Workspace root
 ```
 
@@ -56,21 +56,21 @@ cargo fmt
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 0 | Project Scaffolding | ✅ Done |
-| 1 | Core Domain Types | ✅ Done |
-| 2 | HTTP Engine Basics | ⏳ Pending |
-| 3 | Storage Layer | ⏳ Pending |
-| 4 | Streaming Engine | ⏳ Pending |
-| 5 | Import System | ⏳ Pending |
-| 6 | Workflow Engine | ⏳ Pending |
-| 7-8 | TUI Foundation + Panes | ⏳ Pending |
-| 9 | External Editor Integration | ⏳ Pending |
-| 10 | Time-Travel + Replay | ⏳ Pending |
-| 11 | Observability Panel | ⏳ Pending |
-| 12 | CLI Mode | ⏳ Pending |
-| 13 | Curl Compatibility | ⏳ Pending |
-| 14 | Configuration & Settings | ⏳ Pending |
-| 15 | Integration + Polish | ⏳ Pending |
+| 0 | Project Scaffolding | Done |
+| 1 | Core Domain Types | Done |
+| 2 | HTTP Engine Basics | Pending |
+| 3 | Storage Layer | Pending |
+| 4 | Streaming Engine | Pending |
+| 5 | Import System | Pending |
+| 6 | Workflow Engine | Pending |
+| 7-8 | TUI Foundation + Panes | Pending |
+| 9 | External Editor Integration | Pending |
+| 10 | Time-Travel + Replay | Pending |
+| 11 | Observability Panel | Pending |
+| 12 | CLI Mode | Pending |
+| 13 | Curl Compatibility | Pending |
+| 14 | Configuration & Settings | Pending |
+| 15 | Integration + Polish | Pending |
 
 ## License
 
