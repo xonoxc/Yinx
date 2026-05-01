@@ -18,7 +18,6 @@ A terminal HTTP client with streaming support, workflow orchestration, and impor
 ## Project Structure
 
 ```
-yinx/
 ├── crates/
 │   ├── yinx-core/       [done] Domain types, state, events (135 tests)
 │   ├── yinx-http/       [todo] HTTP client + streaming engine
@@ -27,14 +26,13 @@ yinx/
 │   ├── yinx-import/     [todo] Postman/Insomnia/curl/OpenAPI parsers
 │   ├── yinx-tui/        [todo] Ratatui UI layer
 │   └── yinx-cli/        [todo] CLI without TUI
-├── yinx/                [todo] Main binary (glue)
+├── src/                 [todo] Main binary (glue)
 └── Cargo.toml           Workspace root
 ```
 
 ## Building
 
 ```bash
-cd yinx
 cargo build
 ```
 
