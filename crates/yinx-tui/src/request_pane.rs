@@ -1,0 +1,1767 @@
+use crossterm::event::{KeyCode, KeyModifiers};
+use ratatui::{
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, BorderType, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, Tabs, Wrap},
+    Frame,
+};
+
+use yinx_core::request::{Method, Headers, RequestBody};
+
+use crate::theme::Theme;
+use crate::input::InputBuffer;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestTab {
+    Headers,
+    Body,
+    Auth,
+    Params,
+}
+
+impl RequestTab {
+    pub fn all() -> Vec<RequestTab> {
+        vec![RequestTab::Headers, RequestTab::Body, RequestTab::Auth, RequestTab::Params]
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            RequestTab::Headers => "Headers",
+            RequestTab::Body => "Body",
+            RequestTab::Auth => "Auth",
+            RequestTab::Params => "Params",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedField {
+    Method,
+    Url,
+    Tabs,
+    TabContent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BodyType {
+    Raw,
+    Json,
+    Form,
+}
+
+impl BodyType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BodyType::Raw => "Raw",
+            BodyType::Json => "JSON",
+            BodyType::Form => "Form",
+        }
+    }
+
+    pub fn all() -> Vec<BodyType> {
+        vec![BodyType::Raw, BodyType::Json, BodyType::Form]
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AuthType {
+    None,
+    Basic,
+    Bearer,
+    ApiKey,
+}
+
+impl AuthType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AuthType::None => "None",
+            AuthType::Basic => "Basic",
+            AuthType::Bearer => "Bearer",
+            AuthType::ApiKey => "API Key",
+        }
+    }
+
+    pub fn all() -> Vec<AuthType> {
+        vec![AuthType::None, AuthType::Basic, AuthType::Bearer, AuthType::ApiKey]
+    }
+}
+
+pub struct RequestPane {
+    method: Method,
+    url_buffer: InputBuffer,
+    selected_tab: usize,
+    headers: Vec<(InputBuffer, InputBuffer)>,
+    header_selected: usize,
+    header_field_focus: HeaderField,
+    body_content: InputBuffer,
+    body_type: BodyType,
+    body_type_selected: usize,
+    auth_type: AuthType,
+    auth_username: InputBuffer,
+    auth_password: InputBuffer,
+    auth_token: InputBuffer,
+    auth_key_name: InputBuffer,
+    auth_key_value: InputBuffer,
+    auth_field_focus: AuthField,
+    params: Vec<(InputBuffer, InputBuffer)>,
+    param_selected: usize,
+    param_field_focus: ParamField,
+    focused_field: FocusedField,
+    method_popup_visible: bool,
+    method_list_state: ListState,
+    url_history: Vec<String>,
+    url_autocomplete_visible: bool,
+    url_autocomplete_selected: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HeaderField {
+    Name,
+    Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AuthField {
+    Type,
+    Username,
+    Password,
+    Token,
+    KeyName,
+    KeyValue,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParamField {
+    Key,
+    Value,
+}
+
+impl RequestPane {
+    pub fn new() -> Self {
+        let mut method_list_state = ListState::default();
+        method_list_state.select(Some(0));
+
+        Self {
+            method: Method::Get,
+            url_buffer: InputBuffer::new(),
+            selected_tab: 0,
+            headers: vec![(InputBuffer::new(), InputBuffer::new())],
+            header_selected: 0,
+            header_field_focus: HeaderField::Name,
+            body_content: InputBuffer::new(),
+            body_type: BodyType::Raw,
+            body_type_selected: 0,
+            auth_type: AuthType::None,
+            auth_username: InputBuffer::new(),
+            auth_password: InputBuffer::new(),
+            auth_token: InputBuffer::new(),
+            auth_key_name: InputBuffer::new(),
+            auth_key_value: InputBuffer::new(),
+            auth_field_focus: AuthField::Type,
+            params: vec![(InputBuffer::new(), InputBuffer::new())],
+            param_selected: 0,
+            param_field_focus: ParamField::Key,
+            focused_field: FocusedField::Url,
+            method_popup_visible: false,
+            method_list_state,
+            url_history: Vec::new(),
+            url_autocomplete_visible: false,
+            url_autocomplete_selected: 0,
+        }
+    }
+
+    pub fn with_method(mut self, method: Method) -> Self {
+        self.method = method;
+        self
+    }
+
+    pub fn with_url(mut self, url: &str) -> Self {
+        self.url_buffer = InputBuffer::with_content(url);
+        self
+    }
+
+    pub fn with_headers(mut self, headers: Headers) -> Self {
+        self.headers.clear();
+        for header in headers.iter() {
+            self.headers.push((
+                InputBuffer::with_content(&header.name),
+                InputBuffer::with_content(&header.value),
+            ));
+        }
+        if self.headers.is_empty() {
+            self.headers.push((InputBuffer::new(), InputBuffer::new()));
+        }
+        self
+    }
+
+    pub fn with_body(mut self, body: RequestBody) -> Self {
+        match &body {
+            RequestBody::Raw(s) => {
+                self.body_type = BodyType::Raw;
+                self.body_content = InputBuffer::with_content(s);
+            }
+            RequestBody::Json(v) => {
+                self.body_type = BodyType::Json;
+                self.body_content = InputBuffer::with_content(&serde_json::to_string_pretty(v).unwrap_or_default());
+            }
+            RequestBody::Form(_pairs) => {
+                self.body_type = BodyType::Form;
+                self.body_content = InputBuffer::new();
+            }
+            _ => {
+                self.body_type = BodyType::Raw;
+                self.body_content = InputBuffer::new();
+            }
+        }
+        self
+    }
+
+    pub fn with_url_history(mut self, history: Vec<String>) -> Self {
+        self.url_history = history;
+        self
+    }
+
+    pub fn method(&self) -> Method {
+        self.method
+    }
+
+    pub fn url(&self) -> String {
+        self.url_buffer.as_str().to_string()
+    }
+
+    pub fn headers(&self) -> Headers {
+        let mut headers = Headers::new();
+        for (name_buf, value_buf) in &self.headers {
+            let name = name_buf.as_str().trim();
+            let value = value_buf.as_str().trim();
+            if !name.is_empty() {
+                let _ = headers.set(name, value);
+            }
+        }
+        headers
+    }
+
+    pub fn body(&self) -> RequestBody {
+        match self.body_type {
+            BodyType::Raw => RequestBody::Raw(self.body_content.as_str().to_string()),
+            BodyType::Json => {
+                serde_json::from_str(self.body_content.as_str())
+                    .map(RequestBody::Json)
+                    .unwrap_or(RequestBody::Raw(self.body_content.as_str().to_string()))
+            }
+            BodyType::Form => RequestBody::Form(
+                self.params
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        let key = k.as_str().trim();
+                        if key.is_empty() {
+                            None
+                        } else {
+                            Some((key.to_string(), v.as_str().to_string()))
+                        }
+                    })
+                    .collect(),
+            ),
+        }
+    }
+
+    pub fn set_focused_field(&mut self, field: FocusedField) {
+        self.focused_field = field;
+    }
+
+    pub fn focused_field(&self) -> FocusedField {
+        self.focused_field
+    }
+
+    pub fn handle_key(&mut self, key_code: KeyCode, _modifiers: KeyModifiers) -> bool {
+        if self.method_popup_visible {
+            return self.handle_method_popup_key(key_code);
+        }
+
+        if self.url_autocomplete_visible {
+            return self.handle_autocomplete_key(key_code);
+        }
+
+        match self.focused_field {
+            FocusedField::Method => self.handle_method_key(key_code),
+            FocusedField::Url => self.handle_url_key(key_code),
+            FocusedField::Tabs => self.handle_tabs_key(key_code),
+            FocusedField::TabContent => self.handle_tab_content_key(key_code),
+        }
+    }
+
+    fn handle_method_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Enter => {
+                self.method_popup_visible = true;
+                let current_idx = Method::all().iter().position(|m| *m == self.method).unwrap_or(0);
+                self.method_list_state.select(Some(current_idx));
+                true
+            }
+            KeyCode::Right => {
+                self.focused_field = FocusedField::Url;
+                true
+            }
+            KeyCode::Down | KeyCode::Tab => {
+                self.focused_field = FocusedField::Url;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_url_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Left => {
+                if self.url_buffer.cursor_pos == 0 {
+                    self.focused_field = FocusedField::Method;
+                } else {
+                    self.url_buffer.move_cursor_left();
+                }
+                true
+            }
+            KeyCode::Right => {
+                self.url_buffer.move_cursor_right();
+                true
+            }
+            KeyCode::Backspace => {
+                self.url_buffer.delete_char();
+                true
+            }
+            KeyCode::Enter => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            KeyCode::Tab | KeyCode::Down => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            KeyCode::Up => {
+                if self.url_buffer.cursor_pos == 0 && self.url_buffer.is_empty() {
+                    self.focused_field = FocusedField::Method;
+                }
+                true
+            }
+            KeyCode::Char(c) => {
+                self.url_buffer.insert_char(c);
+                if !self.url_buffer.as_str().is_empty() && !self.url_autocomplete_visible {
+                    self.url_autocomplete_visible = true;
+                    self.url_autocomplete_selected = 0;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_tabs_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Left => {
+                if self.selected_tab == 0 {
+                    self.focused_field = FocusedField::Url;
+                } else {
+                    self.selected_tab = self.selected_tab.saturating_sub(1);
+                }
+                true
+            }
+            KeyCode::Right => {
+                let tabs = RequestTab::all();
+                if self.selected_tab >= tabs.len() - 1 {
+                    self.focused_field = FocusedField::TabContent;
+                } else {
+                    self.selected_tab = (self.selected_tab + 1).min(tabs.len() - 1);
+                }
+                true
+            }
+            KeyCode::Down | KeyCode::Enter => {
+                self.focused_field = FocusedField::TabContent;
+                true
+            }
+            KeyCode::Up => {
+                self.focused_field = FocusedField::Url;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_tab_content_key(&mut self, key_code: KeyCode) -> bool {
+        let tab = RequestTab::all()[self.selected_tab];
+        match tab {
+            RequestTab::Headers => self.handle_headers_key(key_code),
+            RequestTab::Body => self.handle_body_key(key_code),
+            RequestTab::Auth => self.handle_auth_key(key_code),
+            RequestTab::Params => self.handle_params_key(key_code),
+        }
+    }
+
+    fn handle_headers_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Up => {
+                if self.header_selected == 0 {
+                    self.focused_field = FocusedField::Tabs;
+                } else {
+                    self.header_selected = self.header_selected.saturating_sub(1);
+                }
+                true
+            }
+            KeyCode::Down => {
+                if self.header_selected >= self.headers.len() - 1 {
+                    let (k, v) = self.headers.last().unwrap();
+                    if k.as_str().is_empty() && v.as_str().is_empty() {
+                        return true;
+                    }
+                }
+                self.header_selected = (self.header_selected + 1).min(self.headers.len() - 1);
+                true
+            }
+            KeyCode::Left => {
+                self.header_field_focus = HeaderField::Name;
+                true
+            }
+            KeyCode::Right => {
+                self.header_field_focus = HeaderField::Value;
+                true
+            }
+            KeyCode::Char('a') => {
+                self.headers.push((InputBuffer::new(), InputBuffer::new()));
+                self.header_selected = self.headers.len() - 1;
+                true
+            }
+            KeyCode::Char('d') => {
+                if self.headers.len() > 1 && self.header_selected < self.headers.len() {
+                    self.headers.remove(self.header_selected);
+                    if self.header_selected >= self.headers.len() {
+                        self.header_selected = self.headers.len() - 1;
+                    }
+                }
+                true
+            }
+            KeyCode::Backspace => {
+                let (name_buf, value_buf) = &mut self.headers[self.header_selected];
+                match self.header_field_focus {
+                    HeaderField::Name => { name_buf.delete_char(); },
+                    HeaderField::Value => { value_buf.delete_char(); },
+                }
+                true
+            }
+            KeyCode::Char(c) => {
+                let (name_buf, value_buf) = &mut self.headers[self.header_selected];
+                match self.header_field_focus {
+                    HeaderField::Name => name_buf.insert_char(c),
+                    HeaderField::Value => value_buf.insert_char(c),
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
+    fn handle_body_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Up => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            KeyCode::Left => {
+                self.body_content.move_cursor_left();
+                true
+            }
+            KeyCode::Right => {
+                self.body_content.move_cursor_right();
+                true
+            }
+            KeyCode::Backspace => {
+                self.body_content.delete_char();
+                true
+            }
+            KeyCode::Char('t') => {
+                self.body_type_selected = (self.body_type_selected + 1) % BodyType::all().len();
+                self.body_type = BodyType::all()[self.body_type_selected];
+                true
+            }
+            KeyCode::Char(c) => {
+                self.body_content.insert_char(c);
+                true
+            }
+            _ => true,
+        }
+    }
+
+    fn handle_auth_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Up => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            KeyCode::Left => {
+                self.auth_field_focus = AuthField::Type;
+                true
+            }
+            KeyCode::Right => {
+                match self.auth_type {
+                    AuthType::Basic => self.auth_field_focus = AuthField::Username,
+                    AuthType::Bearer => self.auth_field_focus = AuthField::Token,
+                    AuthType::ApiKey => self.auth_field_focus = AuthField::KeyName,
+                    AuthType::None => self.auth_field_focus = AuthField::Type,
+                }
+                true
+            }
+            KeyCode::Down => {
+                match self.auth_type {
+                    AuthType::Basic => {
+                        if self.auth_field_focus == AuthField::Username {
+                            self.auth_field_focus = AuthField::Password;
+                        }
+                    }
+                    AuthType::ApiKey => {
+                        if self.auth_field_focus == AuthField::KeyName {
+                            self.auth_field_focus = AuthField::KeyValue;
+                        }
+                    }
+                    _ => {}
+                }
+                true
+            }
+            KeyCode::Char('t') => {
+                let types = AuthType::all();
+                let current = types.iter().position(|t| *t == self.auth_type).unwrap_or(0);
+                self.auth_type = types[(current + 1) % types.len()];
+                true
+            }
+            KeyCode::Backspace => {
+                match self.auth_field_focus {
+                    AuthField::Username => { self.auth_username.delete_char(); },
+                    AuthField::Password => { self.auth_password.delete_char(); },
+                    AuthField::Token => { self.auth_token.delete_char(); },
+                    AuthField::KeyName => { self.auth_key_name.delete_char(); },
+                    AuthField::KeyValue => { self.auth_key_value.delete_char(); },
+                    _ => {}
+                }
+                true
+            }
+            KeyCode::Char(c) => {
+                match self.auth_field_focus {
+                    AuthField::Username => self.auth_username.insert_char(c),
+                    AuthField::Password => self.auth_password.insert_char(c),
+                    AuthField::Token => self.auth_token.insert_char(c),
+                    AuthField::KeyName => self.auth_key_name.insert_char(c),
+                    AuthField::KeyValue => self.auth_key_value.insert_char(c),
+                    _ => {}
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
+    fn handle_params_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Up => {
+                if self.param_selected == 0 {
+                    self.focused_field = FocusedField::Tabs;
+                } else {
+                    self.param_selected = self.param_selected.saturating_sub(1);
+                }
+                true
+            }
+            KeyCode::Down => {
+                if self.param_selected >= self.params.len() - 1 {
+                    let (k, v) = self.params.last().unwrap();
+                    if k.as_str().is_empty() && v.as_str().is_empty() {
+                        return true;
+                    }
+                }
+                self.param_selected = (self.param_selected + 1).min(self.params.len() - 1);
+                true
+            }
+            KeyCode::Left => {
+                self.param_field_focus = ParamField::Key;
+                true
+            }
+            KeyCode::Right => {
+                self.param_field_focus = ParamField::Value;
+                true
+            }
+            KeyCode::Char('a') => {
+                self.params.push((InputBuffer::new(), InputBuffer::new()));
+                self.param_selected = self.params.len() - 1;
+                true
+            }
+            KeyCode::Char('d') => {
+                if self.params.len() > 1 && self.param_selected < self.params.len() {
+                    self.params.remove(self.param_selected);
+                    if self.param_selected >= self.params.len() {
+                        self.param_selected = self.params.len() - 1;
+                    }
+                }
+                true
+            }
+            KeyCode::Backspace => {
+                let (key_buf, value_buf) = &mut self.params[self.param_selected];
+                match self.param_field_focus {
+                    ParamField::Key => { key_buf.delete_char(); },
+                    ParamField::Value => { value_buf.delete_char(); },
+                }
+                true
+            }
+            KeyCode::Char(c) => {
+                let (key_buf, value_buf) = &mut self.params[self.param_selected];
+                match self.param_field_focus {
+                    ParamField::Key => key_buf.insert_char(c),
+                    ParamField::Value => value_buf.insert_char(c),
+                }
+                true
+            }
+            _ => true,
+        }
+    }
+
+    fn handle_method_popup_key(&mut self, key_code: KeyCode) -> bool {
+        let methods = Method::all();
+        match key_code {
+            KeyCode::Up => {
+                let idx = self.method_list_state.selected().unwrap_or(0);
+                let new_idx = idx.saturating_sub(1);
+                self.method_list_state.select(Some(new_idx));
+            }
+            KeyCode::Down => {
+                let idx = self.method_list_state.selected().unwrap_or(0);
+                let new_idx = (idx + 1).min(methods.len() - 1);
+                self.method_list_state.select(Some(new_idx));
+            }
+            KeyCode::Enter => {
+                if let Some(idx) = self.method_list_state.selected() {
+                    self.method = methods[idx];
+                }
+                self.method_popup_visible = false;
+            }
+            KeyCode::Esc => {
+                self.method_popup_visible = false;
+            }
+            _ => {}
+        }
+        true
+    }
+
+    fn handle_autocomplete_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Up => {
+                if self.url_autocomplete_selected > 0 {
+                    self.url_autocomplete_selected -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let matches = self.get_url_matches();
+                if self.url_autocomplete_selected < matches.len().saturating_sub(1) {
+                    self.url_autocomplete_selected += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let matches = self.get_url_matches();
+                if let Some(url) = matches.get(self.url_autocomplete_selected) {
+                    self.url_buffer = InputBuffer::with_content(url);
+                }
+                self.url_autocomplete_visible = false;
+            }
+            KeyCode::Esc => {
+                self.url_autocomplete_visible = false;
+            }
+            KeyCode::Char(c) => {
+                // Allow typing while autocomplete is visible
+                self.url_buffer.insert_char(c);
+                self.url_autocomplete_selected = 0;
+                if self.get_url_matches().is_empty() {
+                    self.url_autocomplete_visible = false;
+                }
+            }
+            KeyCode::Backspace => {
+                self.url_buffer.delete_char();
+                self.url_autocomplete_selected = 0;
+                if self.get_url_matches().is_empty() {
+                    self.url_autocomplete_visible = false;
+                }
+            }
+            _ => {}
+        }
+        true
+    }
+
+    fn get_url_matches(&self) -> Vec<String> {
+        let input = self.url_buffer.as_str().to_lowercase();
+        self.url_history
+            .iter()
+            .filter(|h| h.to_lowercase().starts_with(&input))
+            .cloned()
+            .collect()
+    }
+
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let border_color = if is_active {
+            theme.border.active_color.as_color()
+        } else {
+            theme.border.color.as_color()
+        };
+
+        let border_type = match theme.border.style {
+            crate::theme::BorderType::Plain => BorderType::Plain,
+            crate::theme::BorderType::Rounded => BorderType::Rounded,
+            crate::theme::BorderType::Double => BorderType::Double,
+            crate::theme::BorderType::Thick => BorderType::Thick,
+        };
+
+        let block = Block::default()
+            .title("Request")
+            .borders(Borders::ALL)
+            .border_type(border_type)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(theme.pane.background.as_color()));
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(inner);
+
+        self.render_method_url(frame, chunks[0], theme, is_active);
+        self.render_tabs(frame, chunks[1], theme, is_active);
+        self.render_tab_content(frame, chunks[2], theme, is_active);
+
+        if self.method_popup_visible {
+            self.render_method_popup(frame, area, theme);
+        }
+
+        if self.url_autocomplete_visible {
+            self.render_autocomplete(frame, chunks[0], theme);
+        }
+    }
+
+    fn render_method_url(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let method_focused = is_active && self.focused_field == FocusedField::Method;
+        let url_focused = is_active && self.focused_field == FocusedField::Url;
+
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(vec![
+                Constraint::Length(10),
+                Constraint::Min(0),
+            ])
+            .split(area);
+
+        let method_text = self.method.as_str();
+        let method_style = if method_focused {
+            Style::default()
+                .fg(theme.highlight.selected_fg.as_color())
+                .bg(theme.highlight.selected_bg.as_color())
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(theme.foreground.as_color())
+        };
+
+        let method_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(if method_focused {
+                Style::default().fg(theme.border.active_color.as_color())
+            } else {
+                Style::default().fg(theme.border.color.as_color())
+            })
+            .style(Style::default().bg(theme.pane.background.as_color()));
+
+        let method_para = Paragraph::new(Line::from(vec![
+            Span::styled(method_text, method_style),
+            Span::raw(" ▼"),
+        ]))
+        .block(method_block)
+        .alignment(Alignment::Center);
+
+        frame.render_widget(method_para, chunks[0]);
+
+        let url_block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(if url_focused {
+                Style::default().fg(theme.border.active_color.as_color())
+            } else {
+                Style::default().fg(theme.border.color.as_color())
+            })
+            .style(Style::default().bg(theme.highlight.bg.as_color()))
+            .title("URL");
+
+        let url_para = Paragraph::new(self.url_buffer.as_str())
+            .block(url_block)
+            .style(Style::default().fg(theme.highlight.fg.as_color()))
+            .wrap(Wrap { trim: true });
+
+        frame.render_widget(url_para, chunks[1]);
+
+        if url_focused {
+            let x_offset = self.url_buffer.as_str()[..self.url_buffer.cursor_pos].chars().count() as u16;
+            frame.set_cursor_position(ratatui::prelude::Position::new(
+                chunks[1].x + 1 + x_offset,
+                chunks[1].y + 1,
+            ));
+        }
+    }
+
+    fn render_tabs(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let tabs = RequestTab::all();
+        let titles: Vec<&str> = tabs.iter().map(|t| t.as_str()).collect();
+
+        let tabs_widget = Tabs::new(titles)
+            .select(self.selected_tab)
+            .block(Block::default().borders(Borders::ALL).border_style(
+                Style::default().fg(if is_active && self.focused_field == FocusedField::Tabs {
+                    theme.border.active_color.as_color()
+                } else {
+                    theme.border.color.as_color()
+                }),
+            ))
+            .style(Style::default().bg(theme.pane.background.as_color()))
+            .highlight_style(
+                Style::default()
+                    .fg(theme.highlight.selected_fg.as_color())
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            );
+
+        frame.render_widget(tabs_widget, area);
+    }
+
+    fn render_tab_content(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let tab = RequestTab::all()[self.selected_tab];
+
+        match tab {
+            RequestTab::Headers => self.render_headers_tab(frame, area, theme, is_active),
+            RequestTab::Body => self.render_body_tab(frame, area, theme, is_active),
+            RequestTab::Auth => self.render_auth_tab(frame, area, theme, is_active),
+            RequestTab::Params => self.render_params_tab(frame, area, theme, is_active),
+        }
+    }
+
+    fn render_headers_tab(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let header = Row::new(vec![
+            Cell::from("Name"),
+            Cell::from("Value"),
+        ])
+        .style(Style::default().fg(theme.pane.title.as_color()).add_modifier(Modifier::BOLD));
+
+        let rows: Vec<Row> = self.headers
+            .iter()
+            .enumerate()
+            .map(|(i, (name, value))| {
+                let is_selected = is_active && self.focused_field == FocusedField::TabContent && self.header_selected == i;
+                let style = if is_selected {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                let name_style = if is_selected && self.header_field_focus == HeaderField::Name {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    style
+                };
+
+                let value_style = if is_selected && self.header_field_focus == HeaderField::Value {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    style
+                };
+
+                Row::new(vec![
+                    Cell::from(name.as_str().to_string()).style(name_style),
+                    Cell::from(value.as_str().to_string()).style(value_style),
+                ])
+                .style(style)
+            })
+            .collect();
+
+        let table = Table::new(rows, &[Constraint::Percentage(40), Constraint::Percentage(60)])
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color()))
+                    .title("Headers (a=add, d=delete, ←→ to switch field)"),
+            )
+            .row_highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color()),
+            );
+
+        let mut state = ratatui::widgets::TableState::default();
+        if is_active && self.focused_field == FocusedField::TabContent {
+            state.select(Some(self.header_selected));
+        }
+
+        frame.render_stateful_widget(table, area, &mut state);
+    }
+
+    fn render_body_tab(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(area);
+
+        let body_type_str = self.body_type.as_str();
+        let type_style = if is_active && self.focused_field == FocusedField::TabContent && self.auth_field_focus == AuthField::Type {
+            Style::default()
+                .fg(theme.highlight.selected_fg.as_color())
+                .bg(theme.highlight.selected_bg.as_color())
+        } else {
+            Style::default().fg(theme.foreground.as_color())
+        };
+
+        let type_para = Paragraph::new(Line::from(vec![
+            Span::styled(format!("Type: {}", body_type_str), type_style),
+            Span::raw(" (press 't' to change)"),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .style(Style::default().bg(theme.pane.background.as_color())),
+        );
+
+        frame.render_widget(type_para, chunks[0]);
+
+        let content_style = if is_active && self.focused_field == FocusedField::TabContent {
+            Style::default()
+                .fg(theme.highlight.selected_fg.as_color())
+                .bg(theme.highlight.selected_bg.as_color())
+        } else {
+            Style::default().fg(theme.highlight.fg.as_color())
+        };
+
+        let body_para = Paragraph::new(self.body_content.as_str())
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.highlight.bg.as_color()))
+                    .title("Body"),
+            )
+            .style(content_style)
+            .wrap(Wrap { trim: false });
+
+        frame.render_widget(body_para, chunks[1]);
+
+        if is_active && self.focused_field == FocusedField::TabContent {
+            let x_offset = self.body_content.as_str()[..self.body_content.cursor_pos].chars().count() as u16;
+            frame.set_cursor_position(ratatui::prelude::Position::new(
+                chunks[1].x + 1 + x_offset,
+                chunks[1].y + 1,
+            ));
+        }
+    }
+
+    fn render_auth_tab(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let auth_type_str = self.auth_type.as_str();
+        let is_focused = is_active && self.focused_field == FocusedField::TabContent;
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(area);
+
+        let type_style = if is_focused && self.auth_field_focus == AuthField::Type {
+            Style::default()
+                .fg(theme.highlight.selected_fg.as_color())
+                .bg(theme.highlight.selected_bg.as_color())
+        } else {
+            Style::default().fg(theme.foreground.as_color())
+        };
+
+        let type_para = Paragraph::new(Line::from(vec![
+            Span::styled("Type: ", Style::default().fg(theme.pane.title.as_color()).add_modifier(Modifier::BOLD)),
+            Span::styled(auth_type_str, type_style),
+            Span::raw(" (press 't' to change)"),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .style(Style::default().bg(theme.pane.background.as_color()))
+                .title("Authentication"),
+        );
+
+        frame.render_widget(type_para, chunks[0]);
+
+        match self.auth_type {
+            AuthType::None => {
+                let para = Paragraph::new("No authentication configured")
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(theme.border.color.as_color()))
+                            .style(Style::default().bg(theme.pane.background.as_color())),
+                    )
+                    .style(Style::default().fg(theme.foreground.as_color()));
+                frame.render_widget(para, chunks[1]);
+            }
+            AuthType::Basic => {
+                let inner_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vec![
+                        Constraint::Length(3),
+                        Constraint::Length(3),
+                    ])
+                    .split(chunks[1]);
+
+                let user_style = if is_focused && self.auth_field_focus == AuthField::Username {
+                    Style::default()
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .bg(theme.highlight.selected_bg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                let pass_style = if is_focused && self.auth_field_focus == AuthField::Password {
+                    Style::default()
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .bg(theme.highlight.selected_bg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                let user_para = Paragraph::new(self.auth_username.as_str())
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if is_focused && self.auth_field_focus == AuthField::Username {
+                                Style::default().fg(theme.border.active_color.as_color())
+                            } else {
+                                Style::default().fg(theme.border.color.as_color())
+                            })
+                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .title("Username"),
+                    )
+                    .style(user_style);
+
+                frame.render_widget(user_para, inner_chunks[0]);
+
+                let pass_para = Paragraph::new(self.auth_password.as_str())
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if is_focused && self.auth_field_focus == AuthField::Password {
+                                Style::default().fg(theme.border.active_color.as_color())
+                            } else {
+                                Style::default().fg(theme.border.color.as_color())
+                            })
+                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .title("Password"),
+                    )
+                    .style(pass_style);
+
+                frame.render_widget(pass_para, inner_chunks[1]);
+
+                if is_focused && self.auth_field_focus == AuthField::Username {
+                    let x_offset = self.auth_username.as_str()[..self.auth_username.cursor_pos].chars().count() as u16;
+                    frame.set_cursor_position(ratatui::prelude::Position::new(
+                        inner_chunks[0].x + 1 + x_offset,
+                        inner_chunks[0].y + 1,
+                    ));
+                } else if is_focused && self.auth_field_focus == AuthField::Password {
+                    let x_offset = self.auth_password.as_str()[..self.auth_password.cursor_pos].chars().count() as u16;
+                    frame.set_cursor_position(ratatui::prelude::Position::new(
+                        inner_chunks[1].x + 1 + x_offset,
+                        inner_chunks[1].y + 1,
+                    ));
+                }
+            }
+            AuthType::Bearer => {
+                let token_style = if is_focused && self.auth_field_focus == AuthField::Token {
+                    Style::default()
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .bg(theme.highlight.selected_bg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                let token_para = Paragraph::new(self.auth_token.as_str())
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if is_focused && self.auth_field_focus == AuthField::Token {
+                                Style::default().fg(theme.border.active_color.as_color())
+                            } else {
+                                Style::default().fg(theme.border.color.as_color())
+                            })
+                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .title("Bearer Token"),
+                    )
+                    .style(token_style);
+
+                frame.render_widget(token_para, chunks[1]);
+
+                if is_focused && self.auth_field_focus == AuthField::Token {
+                    let x_offset = self.auth_token.as_str()[..self.auth_token.cursor_pos].chars().count() as u16;
+                    frame.set_cursor_position(ratatui::prelude::Position::new(
+                        chunks[1].x + 1 + x_offset,
+                        chunks[1].y + 1,
+                    ));
+                }
+            }
+            AuthType::ApiKey => {
+                let inner_chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vec![
+                        Constraint::Length(3),
+                        Constraint::Length(3),
+                    ])
+                    .split(chunks[1]);
+
+                let key_style = if is_focused && self.auth_field_focus == AuthField::KeyName {
+                    Style::default()
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .bg(theme.highlight.selected_bg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                let value_style = if is_focused && self.auth_field_focus == AuthField::KeyValue {
+                    Style::default()
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .bg(theme.highlight.selected_bg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                let key_para = Paragraph::new(self.auth_key_name.as_str())
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if is_focused && self.auth_field_focus == AuthField::KeyName {
+                                Style::default().fg(theme.border.active_color.as_color())
+                            } else {
+                                Style::default().fg(theme.border.color.as_color())
+                            })
+                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .title("Key Name"),
+                    )
+                    .style(key_style);
+
+                frame.render_widget(key_para, inner_chunks[0]);
+
+                let value_para = Paragraph::new(self.auth_key_value.as_str())
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(if is_focused && self.auth_field_focus == AuthField::KeyValue {
+                                Style::default().fg(theme.border.active_color.as_color())
+                            } else {
+                                Style::default().fg(theme.border.color.as_color())
+                            })
+                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .title("Key Value"),
+                    )
+                    .style(value_style);
+
+                frame.render_widget(value_para, inner_chunks[1]);
+
+                if is_focused && self.auth_field_focus == AuthField::KeyName {
+                    let x_offset = self.auth_key_name.as_str()[..self.auth_key_name.cursor_pos].chars().count() as u16;
+                    frame.set_cursor_position(ratatui::prelude::Position::new(
+                        inner_chunks[0].x + 1 + x_offset,
+                        inner_chunks[0].y + 1,
+                    ));
+                } else if is_focused && self.auth_field_focus == AuthField::KeyValue {
+                    let x_offset = self.auth_key_value.as_str()[..self.auth_key_value.cursor_pos].chars().count() as u16;
+                    frame.set_cursor_position(ratatui::prelude::Position::new(
+                        inner_chunks[1].x + 1 + x_offset,
+                        inner_chunks[1].y + 1,
+                    ));
+                }
+            }
+        }
+    }
+
+    fn render_params_tab(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let header = Row::new(vec![
+            Cell::from("Key"),
+            Cell::from("Value"),
+        ])
+        .style(Style::default().fg(theme.pane.title.as_color()).add_modifier(Modifier::BOLD));
+
+        let rows: Vec<Row> = self.params
+            .iter()
+            .enumerate()
+            .map(|(i, (key, value))| {
+                let is_selected = is_active && self.focused_field == FocusedField::TabContent && self.param_selected == i;
+                let style = if is_selected {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                let key_style = if is_selected && self.param_field_focus == ParamField::Key {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    style
+                };
+
+                let value_style = if is_selected && self.param_field_focus == ParamField::Value {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    style
+                };
+
+                Row::new(vec![
+                    Cell::from(key.as_str().to_string()).style(key_style),
+                    Cell::from(value.as_str().to_string()).style(value_style),
+                ])
+                .style(style)
+            })
+            .collect();
+
+        let table = Table::new(rows, &[Constraint::Percentage(40), Constraint::Percentage(60)])
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color()))
+                    .title("Query Parameters (a=add, d=delete, ←→ to switch field)"),
+            )
+            .row_highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color()),
+            );
+
+        let mut state = ratatui::widgets::TableState::default();
+        if is_active && self.focused_field == FocusedField::TabContent {
+            state.select(Some(self.param_selected));
+        }
+
+        frame.render_stateful_widget(table, area, &mut state);
+    }
+
+    fn render_method_popup(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let popup_area = centered_rect(30, 30, area);
+        frame.render_widget(Clear, popup_area);
+
+        let methods = Method::all();
+        let items: Vec<ListItem> = methods
+            .iter()
+            .map(|m| ListItem::new(m.as_str()))
+            .collect();
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .title("Select Method")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(theme.border.active_color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color())),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color())
+                    .add_modifier(Modifier::BOLD),
+            );
+
+        let mut state = ListState::default();
+        if let Some(sel) = self.method_list_state.selected() {
+            state.select(Some(sel));
+        }
+
+        frame.render_stateful_widget(list, popup_area, &mut state);
+    }
+
+    fn render_autocomplete(&self, frame: &mut Frame, url_area: Rect, theme: &Theme) {
+        let matches = self.get_url_matches();
+        if matches.is_empty() {
+            return;
+        }
+
+        let popup_area = Rect {
+            x: url_area.x + 10,
+            y: url_area.y + 3,
+            width: url_area.width.saturating_sub(10),
+            height: (matches.len() as u16 + 2).min(10),
+        };
+
+        frame.render_widget(Clear, popup_area);
+
+        let items: Vec<ListItem> = matches
+            .iter()
+            .enumerate()
+            .map(|(i, m)| {
+                if i == self.url_autocomplete_selected {
+                    ListItem::new(m.as_str()).style(
+                        Style::default()
+                            .bg(theme.highlight.selected_bg.as_color())
+                            .fg(theme.highlight.selected_fg.as_color()),
+                    )
+                } else {
+                    ListItem::new(m.as_str())
+                }
+            })
+            .collect();
+
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.active_color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color())),
+            );
+
+        frame.render_widget(list, popup_area);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+impl Default for RequestPane {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_request_pane_new() {
+        let pane = RequestPane::new();
+        assert_eq!(pane.method(), Method::Get);
+        assert!(pane.url().is_empty());
+        assert_eq!(pane.focused_field(), FocusedField::Url);
+    }
+
+    #[test]
+    fn test_request_pane_with_method() {
+        let pane = RequestPane::new().with_method(Method::Post);
+        assert_eq!(pane.method(), Method::Post);
+    }
+
+    #[test]
+    fn test_request_pane_with_url() {
+        let pane = RequestPane::new().with_url("https://example.com");
+        assert_eq!(pane.url(), "https://example.com");
+    }
+
+    #[test]
+    fn test_request_pane_headers() {
+        let mut headers = Headers::new();
+        let _ = headers.set("Content-Type", "application/json");
+        let pane = RequestPane::new().with_headers(headers);
+        let retrieved = pane.headers();
+        assert_eq!(retrieved.get("Content-Type"), Some("application/json"));
+    }
+
+    #[test]
+    fn test_request_pane_body() {
+        let pane = RequestPane::new().with_body(RequestBody::Raw("test body".to_string()));
+        let body = pane.body();
+        assert_eq!(body, RequestBody::Raw("test body".to_string()));
+    }
+
+    #[test]
+    fn test_request_tab_all() {
+        let tabs = RequestTab::all();
+        assert_eq!(tabs.len(), 4);
+        assert!(matches!(tabs[0], RequestTab::Headers));
+        assert!(matches!(tabs[3], RequestTab::Params));
+    }
+
+    #[test]
+    fn test_request_tab_as_str() {
+        assert_eq!(RequestTab::Headers.as_str(), "Headers");
+        assert_eq!(RequestTab::Body.as_str(), "Body");
+        assert_eq!(RequestTab::Auth.as_str(), "Auth");
+        assert_eq!(RequestTab::Params.as_str(), "Params");
+    }
+
+    #[test]
+    fn test_focused_field_set_get() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Method);
+        assert_eq!(pane.focused_field(), FocusedField::Method);
+
+        pane.set_focused_field(FocusedField::Tabs);
+        assert_eq!(pane.focused_field(), FocusedField::Tabs);
+    }
+
+    #[test]
+    fn test_body_type_as_str() {
+        assert_eq!(BodyType::Raw.as_str(), "Raw");
+        assert_eq!(BodyType::Json.as_str(), "JSON");
+        assert_eq!(BodyType::Form.as_str(), "Form");
+    }
+
+    #[test]
+    fn test_auth_type_as_str() {
+        assert_eq!(AuthType::None.as_str(), "None");
+        assert_eq!(AuthType::Basic.as_str(), "Basic");
+        assert_eq!(AuthType::Bearer.as_str(), "Bearer");
+        assert_eq!(AuthType::ApiKey.as_str(), "API Key");
+    }
+
+    #[test]
+    fn test_auth_type_all() {
+        let types = AuthType::all();
+        assert_eq!(types.len(), 4);
+    }
+
+    #[test]
+    fn test_request_pane_url_history() {
+        let history = vec!["https://example.com".to_string(), "https://google.com".to_string()];
+        let pane = RequestPane::new().with_url_history(history);
+        assert_eq!(pane.url_history.len(), 2);
+    }
+
+    #[test]
+    fn test_request_pane_default_headers() {
+        let pane = RequestPane::new();
+        assert_eq!(pane.headers.len(), 1);
+    }
+
+    #[test]
+    fn test_request_pane_default_params() {
+        let pane = RequestPane::new();
+        assert_eq!(pane.params.len(), 1);
+    }
+
+    #[test]
+    fn test_handle_method_key_enter() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Method);
+        let result = pane.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(result);
+        assert!(pane.method_popup_visible);
+    }
+
+    #[test]
+    fn test_handle_method_key_right() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Method);
+        let result = pane.handle_key(KeyCode::Right, KeyModifiers::NONE);
+        assert!(result);
+        assert_eq!(pane.focused_field(), FocusedField::Url);
+    }
+
+    #[test]
+    fn test_handle_url_key_left() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Url);
+        let result = pane.handle_key(KeyCode::Left, KeyModifiers::NONE);
+        assert!(result);
+        assert_eq!(pane.focused_field(), FocusedField::Method);
+    }
+
+    #[test]
+    fn test_handle_url_key_tab() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Url);
+        let result = pane.handle_key(KeyCode::Tab, KeyModifiers::NONE);
+        assert!(result);
+        assert_eq!(pane.focused_field(), FocusedField::Tabs);
+    }
+
+    #[test]
+    fn test_handle_url_typing() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Url);
+        pane.handle_key(KeyCode::Char('h'), KeyModifiers::NONE);
+        assert_eq!(pane.url(), "h");
+        pane.handle_key(KeyCode::Char('i'), KeyModifiers::NONE);
+        assert_eq!(pane.url(), "hi");
+    }
+
+    #[test]
+    fn test_handle_url_backspace() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Url);
+        pane.handle_key(KeyCode::Char('h'), KeyModifiers::NONE);
+        pane.handle_key(KeyCode::Char('i'), KeyModifiers::NONE);
+        pane.handle_key(KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!(pane.url(), "h");
+    }
+
+    #[test]
+    fn test_handle_tabs_key_left_from_first() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Tabs);
+        pane.selected_tab = 0;
+        let result = pane.handle_key(KeyCode::Left, KeyModifiers::NONE);
+        assert!(result);
+        assert_eq!(pane.focused_field(), FocusedField::Url);
+    }
+
+    #[test]
+    fn test_handle_tabs_key_right_to_content() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Tabs);
+        pane.selected_tab = RequestTab::all().len() - 1;
+        let result = pane.handle_key(KeyCode::Right, KeyModifiers::NONE);
+        assert!(result);
+        assert_eq!(pane.focused_field(), FocusedField::TabContent);
+    }
+
+    #[test]
+    fn test_handle_tabs_key_down_to_content() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Tabs);
+        let result = pane.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        assert!(result);
+        assert_eq!(pane.focused_field(), FocusedField::TabContent);
+    }
+
+    #[test]
+    fn test_handle_tab_content_key_up_to_tabs() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        let result = pane.handle_key(KeyCode::Up, KeyModifiers::NONE);
+        assert!(result);
+        assert_eq!(pane.focused_field(), FocusedField::Tabs);
+    }
+
+    #[test]
+    fn test_handle_headers_add_delete() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        pane.selected_tab = 0; // Headers tab
+
+        // Add a header
+        pane.handle_key(KeyCode::Char('a'), KeyModifiers::NONE);
+        assert_eq!(pane.headers.len(), 2);
+
+        // Delete the added header
+        pane.handle_key(KeyCode::Char('d'), KeyModifiers::NONE);
+        assert_eq!(pane.headers.len(), 1);
+    }
+
+    #[test]
+    fn test_handle_headers_edit() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        pane.selected_tab = 0; // Headers tab
+
+        // Edit header name
+        pane.handle_key(KeyCode::Char('C'), KeyModifiers::NONE);
+        assert!(pane.headers[0].0.as_str().contains('C'));
+
+        // Switch to value field
+        pane.handle_key(KeyCode::Right, KeyModifiers::NONE);
+
+        // Edit header value
+        pane.handle_key(KeyCode::Char('v'), KeyModifiers::NONE);
+        assert!(pane.headers[0].1.as_str().contains('v'));
+    }
+
+    #[test]
+    fn test_handle_body_edit() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        pane.selected_tab = 1; // Body tab
+
+        // Type in body
+        pane.handle_key(KeyCode::Char('h'), KeyModifiers::NONE);
+        pane.handle_key(KeyCode::Char('i'), KeyModifiers::NONE);
+        assert!(pane.body_content.as_str().contains("hi"));
+    }
+
+    #[test]
+    fn test_handle_body_type_change() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        pane.selected_tab = 1; // Body tab
+
+        assert_eq!(pane.body_type, BodyType::Raw);
+        pane.handle_key(KeyCode::Char('t'), KeyModifiers::NONE);
+        assert_eq!(pane.body_type, BodyType::Json);
+    }
+
+    #[test]
+    fn test_handle_auth_type_change() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        pane.selected_tab = 2; // Auth tab
+
+        assert_eq!(pane.auth_type, AuthType::None);
+        pane.handle_key(KeyCode::Char('t'), KeyModifiers::NONE);
+        assert_eq!(pane.auth_type, AuthType::Basic);
+    }
+
+    #[test]
+    fn test_handle_auth_basic_edit() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        pane.selected_tab = 2; // Auth tab
+        pane.auth_type = AuthType::Basic;
+
+        // Move to username field
+        pane.handle_key(KeyCode::Right, KeyModifiers::NONE);
+        pane.handle_key(KeyCode::Char('u'), KeyModifiers::NONE);
+        assert!(pane.auth_username.as_str().contains('u'));
+
+        // Move to password field
+        pane.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        pane.handle_key(KeyCode::Char('p'), KeyModifiers::NONE);
+        assert!(pane.auth_password.as_str().contains('p'));
+    }
+
+    #[test]
+    fn test_handle_params_add_delete() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        pane.selected_tab = 3; // Params tab
+
+        // Add a param
+        pane.handle_key(KeyCode::Char('a'), KeyModifiers::NONE);
+        assert_eq!(pane.params.len(), 2);
+
+        // Delete the added param
+        pane.handle_key(KeyCode::Char('d'), KeyModifiers::NONE);
+        assert_eq!(pane.params.len(), 1);
+    }
+
+    #[test]
+    fn test_handle_params_edit() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::TabContent);
+        pane.selected_tab = 3; // Params tab
+
+        // Edit param key
+        pane.handle_key(KeyCode::Char('k'), KeyModifiers::NONE);
+        assert!(pane.params[0].0.as_str().contains('k'));
+
+        // Switch to value field
+        pane.handle_key(KeyCode::Right, KeyModifiers::NONE);
+
+        // Edit param value
+        pane.handle_key(KeyCode::Char('v'), KeyModifiers::NONE);
+        assert!(pane.params[0].1.as_str().contains('v'));
+    }
+
+    #[test]
+    fn test_method_popup_navigation() {
+        let mut pane = RequestPane::new();
+        pane.method_popup_visible = true;
+        pane.method_list_state.select(Some(0));
+
+        pane.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(pane.method_list_state.selected(), Some(1));
+
+        pane.handle_key(KeyCode::Up, KeyModifiers::NONE);
+        assert_eq!(pane.method_list_state.selected(), Some(0));
+    }
+
+    #[test]
+    fn test_method_popup_enter_selects() {
+        let mut pane = RequestPane::new();
+        pane.method = Method::Get;
+        pane.method_popup_visible = true;
+        pane.method_list_state.select(Some(1)); // POST
+
+        pane.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!pane.method_popup_visible);
+        assert_eq!(pane.method(), Method::Post);
+    }
+
+    #[test]
+    fn test_method_popup_esc_cancels() {
+        let mut pane = RequestPane::new();
+        pane.method_popup_visible = true;
+
+        pane.handle_key(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(!pane.method_popup_visible);
+    }
+
+    #[test]
+    fn test_url_autocomplete() {
+        let mut pane = RequestPane::new();
+        pane.url_history = vec![
+            "https://example.com".to_string(),
+            "https://google.com".to_string(),
+            "https://github.com".to_string(),
+        ];
+        pane.url_buffer = InputBuffer::with_content("https://e");
+        pane.url_autocomplete_visible = true;
+
+        let matches = pane.get_url_matches();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0], "https://example.com");
+
+        pane.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!pane.url_autocomplete_visible);
+        assert_eq!(pane.url(), "https://example.com");
+    }
+
+    #[test]
+    fn test_url_autocomplete_navigation() {
+        let mut pane = RequestPane::new();
+        pane.url_history = vec![
+            "https://example.com".to_string(),
+            "https://google.com".to_string(),
+        ];
+        pane.url_buffer = InputBuffer::with_content("https://");
+        pane.url_autocomplete_visible = true;
+        pane.url_autocomplete_selected = 0;
+
+        pane.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        assert!(pane.url_autocomplete_selected <= 1);
+    }
+
+    #[test]
+    fn test_layout_renders() {
+        let pane = RequestPane::new();
+        assert_eq!(pane.focused_field(), FocusedField::Url);
+    }
+}
