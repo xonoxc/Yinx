@@ -1,4 +1,4 @@
-use crate::graph::{GraphError, Workflow, WorkflowEdge, WorkflowNode};
+use crate::graph::{GraphError, ValidationError, Workflow, WorkflowEdge, WorkflowNode};
 use crate::variables::{interpolate, VariableStore};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,28 @@ impl Default for RetryConfig {
             base_delay_ms: 1000,
             backoff_multiplier: 2.0,
         }
+    }
+}
+
+impl RetryConfig {
+    /// 6.28: Validate retry configuration
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        if self.max_attempts == 0 {
+            return Err(ValidationError::InvalidRetryConfig(
+                "max_attempts must be greater than 0".to_string(),
+            ));
+        }
+        if self.base_delay_ms == 0 {
+            return Err(ValidationError::InvalidRetryConfig(
+                "base_delay_ms must be greater than 0".to_string(),
+            ));
+        }
+        if self.backoff_multiplier <= 0.0 {
+            return Err(ValidationError::InvalidRetryConfig(
+                "backoff_multiplier must be greater than 0".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -873,5 +895,57 @@ mod tests {
 
         let result = executor.execute_node(&node, &options).await;
         assert!(result.response.is_some());
+    }
+
+    // 6.28: Validate retry configuration
+    #[test]
+    fn test_6_28_retry_config_zero_max_attempts() {
+        let config = RetryConfig {
+            max_attempts: 0,
+            base_delay_ms: 100,
+            backoff_multiplier: 2.0,
+        };
+        assert!(config.validate().is_err());
+        if let Err(ValidationError::InvalidRetryConfig(msg)) = config.validate() {
+            assert!(msg.contains("max_attempts"));
+        } else {
+            panic!("Expected InvalidRetryConfig error");
+        }
+    }
+
+    #[test]
+    fn test_6_28_retry_config_zero_base_delay() {
+        let config = RetryConfig {
+            max_attempts: 3,
+            base_delay_ms: 0,
+            backoff_multiplier: 2.0,
+        };
+        assert!(config.validate().is_err());
+        if let Err(ValidationError::InvalidRetryConfig(msg)) = config.validate() {
+            assert!(msg.contains("base_delay_ms"));
+        } else {
+            panic!("Expected InvalidRetryConfig error");
+        }
+    }
+
+    #[test]
+    fn test_6_28_retry_config_zero_backoff() {
+        let config = RetryConfig {
+            max_attempts: 3,
+            base_delay_ms: 100,
+            backoff_multiplier: 0.0,
+        };
+        assert!(config.validate().is_err());
+        if let Err(ValidationError::InvalidRetryConfig(msg)) = config.validate() {
+            assert!(msg.contains("backoff_multiplier"));
+        } else {
+            panic!("Expected InvalidRetryConfig error");
+        }
+    }
+
+    #[test]
+    fn test_6_28_valid_retry_config() {
+        let config = RetryConfig::default();
+        assert!(config.validate().is_ok());
     }
 }
