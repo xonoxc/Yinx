@@ -7,6 +7,7 @@ edition.workspace = true
 yinx-core = { path = "../yinx-core" }
 yinx-http = { path = "../yinx-http" }
 yinx-storage = { path = "../yinx-storage" }
+yinx-workflow = { path = "../yinx-workflow" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 tokio = { workspace = true }
