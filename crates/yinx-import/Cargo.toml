@@ -12,3 +12,4 @@ serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 tracing = { workspace = true }
+base64 = { workspace = true }

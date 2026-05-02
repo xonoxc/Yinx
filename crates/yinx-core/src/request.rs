@@ -235,22 +235,39 @@ impl From<serde_json::Value> for RequestBody {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RequestUrl {
     inner: StdUrl,
+    #[serde(skip)]
+    raw_template: Option<String>,
 }
 
 impl RequestUrl {
     pub fn new(url: &str) -> Result<Self, RequestError> {
-        let inner = StdUrl::parse(url).map_err(|e| RequestError::InvalidUrl(e.to_string()))?;
-        match inner.scheme() {
-            "http" | "https" => Ok(Self { inner }),
-            _ => Err(RequestError::InvalidUrl(format!(
-                "Unsupported scheme: {}",
-                inner.scheme()
-            ))),
+        // Check if this is a template URL (contains { or })
+        if url.contains('{') || url.contains('}') {
+            // For template URLs, store the raw template and use a placeholder for inner
+            let placeholder = "https://example.com";
+            let inner = StdUrl::parse(placeholder).map_err(|e| RequestError::InvalidUrl(e.to_string()))?;
+            Ok(Self {
+                inner,
+                raw_template: Some(url.to_string()),
+            })
+        } else {
+            let inner = StdUrl::parse(url).map_err(|e| RequestError::InvalidUrl(e.to_string()))?;
+            match inner.scheme() {
+                "http" | "https" => Ok(Self { inner, raw_template: None }),
+                _ => Err(RequestError::InvalidUrl(format!(
+                    "Unsupported scheme: {}",
+                    inner.scheme()
+                ))),
+            }
         }
     }
 
     pub fn as_str(&self) -> &str {
-        self.inner.as_str()
+        if let Some(template) = &self.raw_template {
+            template
+        } else {
+            self.inner.as_str()
+        }
     }
 
     pub fn inner(&self) -> &StdUrl {
@@ -258,8 +275,10 @@ impl RequestUrl {
     }
 
     pub fn normalize(&self) -> Self {
-        let url = self.inner.clone();
-        Self { inner: url }
+        Self {
+            inner: self.inner.clone(),
+            raw_template: self.raw_template.clone(),
+        }
     }
 }
 
