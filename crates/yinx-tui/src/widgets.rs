@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 
+use yinx_core::state::NetworkState;
+
 use crate::theme::Theme;
 
 pub struct Panel<'a> {
@@ -325,6 +327,9 @@ impl<'a> InputField<'a> {
 pub struct StatusBar<'a> {
     hints: Vec<(&'a str, &'a str)>,
     mode: &'a str,
+    network_state: Option<&'a yinx_core::state::NetworkState>,
+    cursor_line: usize,
+    cursor_col: usize,
 }
 
 impl<'a> StatusBar<'a> {
@@ -332,6 +337,9 @@ impl<'a> StatusBar<'a> {
         Self {
             hints: Vec::new(),
             mode,
+            network_state: None,
+            cursor_line: 0,
+            cursor_col: 0,
         }
     }
 
@@ -340,13 +348,62 @@ impl<'a> StatusBar<'a> {
         self
     }
 
+    pub fn with_network_state(mut self, state: &'a yinx_core::state::NetworkState) -> Self {
+        self.network_state = Some(state);
+        self
+    }
+
+    pub fn with_cursor(mut self, line: usize, col: usize) -> Self {
+        self.cursor_line = line;
+        self.cursor_col = col;
+        self
+    }
+
+    fn mode_color(&self, theme: &Theme) -> ratatui::style::Color {
+        match self.mode {
+            "NORMAL" => theme.semantic.info.as_color(),
+            "INSERT" => theme.semantic.success.as_color(),
+            "VISUAL" => theme.semantic.warning.as_color(),
+            _ => theme.foreground.as_color(),
+        }
+    }
+
+    fn network_status_text(&self) -> &'static str {
+        match self.network_state {
+            Some(NetworkState::Idle) => "IDLE",
+            Some(NetworkState::Loading) => "LOADING",
+            Some(NetworkState::Streaming) => "STREAMING",
+            Some(NetworkState::Error(_)) => "ERROR",
+            None => "IDLE",
+        }
+    }
+
+    fn network_status_color(&self, theme: &Theme) -> ratatui::style::Color {
+        match self.network_state {
+            Some(NetworkState::Idle) => theme.semantic.success.as_color(),
+            Some(NetworkState::Loading) => theme.semantic.warning.as_color(),
+            Some(NetworkState::Streaming) => theme.semantic.info.as_color(),
+            Some(NetworkState::Error(_)) => theme.semantic.error.as_color(),
+            None => theme.foreground.as_color(),
+        }
+    }
+
     pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let mode_span = Span::styled(
             self.mode,
             Style::default()
-                .fg(theme.semantic.info.as_color())
+                .fg(self.mode_color(theme))
                 .add_modifier(Modifier::BOLD),
         );
+
+        let network_span = Span::styled(
+            self.network_status_text(),
+            Style::default()
+                .fg(self.network_status_color(theme))
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let cursor_span = Span::raw(format!("Ln {}, Col {}", self.cursor_line + 1, self.cursor_col + 1));
 
         let hint_spans: Vec<Span> = self
             .hints
@@ -367,7 +424,14 @@ impl<'a> StatusBar<'a> {
             })
             .collect();
 
-        let mut line = vec![mode_span, Span::raw(" | ")];
+        let mut line = vec![
+            mode_span,
+            Span::raw(" | "),
+            network_span,
+            Span::raw(" | "),
+            cursor_span,
+            Span::raw(" | "),
+        ];
         line.extend(hint_spans);
 
         let paragraph = Paragraph::new(Line::from(line))
@@ -486,6 +550,7 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::theme::Theme;
 
     #[test]
@@ -597,16 +662,43 @@ mod tests {
 
     #[test]
     fn test_status_bar_new() {
-        let bar = StatusBar::new("Normal");
-        assert_eq!(bar.mode, "Normal");
+        let bar = StatusBar::new("NORMAL");
+        assert_eq!(bar.mode, "NORMAL");
         assert!(bar.hints.is_empty());
+        assert!(bar.network_state.is_none());
+        assert_eq!(bar.cursor_line, 0);
+        assert_eq!(bar.cursor_col, 0);
     }
 
     #[test]
     fn test_status_bar_with_hints() {
         let hints = vec![("q", "quit"), ("i", "insert")];
-        let bar = StatusBar::new("Normal").with_hints(hints);
+        let bar = StatusBar::new("NORMAL").with_hints(hints);
         assert_eq!(bar.hints.len(), 2);
+    }
+
+    #[test]
+    fn test_status_bar_with_network_state() {
+        let state = NetworkState::Loading;
+        let bar = StatusBar::new("NORMAL").with_network_state(&state);
+        assert!(bar.network_state.is_some());
+    }
+
+    #[test]
+    fn test_status_bar_with_cursor() {
+        let bar = StatusBar::new("NORMAL").with_cursor(10, 5);
+        assert_eq!(bar.cursor_line, 10);
+        assert_eq!(bar.cursor_col, 5);
+    }
+
+    #[test]
+    fn test_status_bar_mode_colors() {
+        let bar_normal = StatusBar::new("NORMAL");
+        let bar_insert = StatusBar::new("INSERT");
+        let bar_visual = StatusBar::new("VISUAL");
+        assert_eq!(bar_normal.mode, "NORMAL");
+        assert_eq!(bar_insert.mode, "INSERT");
+        assert_eq!(bar_visual.mode, "VISUAL");
     }
 
     #[test]
