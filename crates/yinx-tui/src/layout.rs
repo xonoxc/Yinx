@@ -56,19 +56,10 @@ pub struct PaneRects {
     pub status_bar: Rect,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LayoutState {
     pub config: LayoutConfig,
     pub constraints: PaneConstraintsMap,
-}
-
-impl Default for LayoutState {
-    fn default() -> Self {
-        Self {
-            config: LayoutConfig::default(),
-            constraints: PaneConstraintsMap::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

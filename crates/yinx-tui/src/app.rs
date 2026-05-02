@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::{
-    event::{self, Event, KeyEvent},
+    event::{self, Event},
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::backend::CrosstermBackend;
@@ -14,6 +14,8 @@ use ratatui::Terminal as RatatuiTerminal;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 #[allow(unused_imports)]
 use yinx_core::state::{ActivePane, InputMode, UiState};
+
+use crate::input::InputHandler;
 
 pub type TerminalType = RatatuiTerminal<CrosstermBackend<io::Stdout>>;
 
@@ -79,6 +81,7 @@ impl Drop for TerminalGuard {
 pub struct EventLoop {
     event_sender: tokio::sync::mpsc::Sender<AppEvent>,
     shutdown_flag: Arc<AtomicBool>,
+    input_handler: InputHandler,
 }
 
 impl EventLoop {
@@ -89,6 +92,19 @@ impl EventLoop {
         Self {
             event_sender,
             shutdown_flag,
+            input_handler: InputHandler::new(),
+        }
+    }
+
+    pub fn with_input_handler(
+        event_sender: tokio::sync::mpsc::Sender<AppEvent>,
+        shutdown_flag: Arc<AtomicBool>,
+        input_handler: InputHandler,
+    ) -> Self {
+        Self {
+            event_sender,
+            shutdown_flag,
+            input_handler,
         }
     }
 
@@ -101,16 +117,16 @@ impl EventLoop {
 
                 match event {
                     Event::Key(key_event) => {
-                        if is_quit_key(&key_event) {
-                            self.shutdown_flag.store(true, Ordering::SeqCst);
-                            let _ = self.event_sender.send(AppEvent::Quit).await;
+                        let events = self.input_handler.handle_key(key_event);
+                        for app_event in events {
+                            if matches!(app_event, AppEvent::Quit) {
+                                self.shutdown_flag.store(true, Ordering::SeqCst);
+                            }
+                            let _ = self.event_sender.send(app_event).await;
+                        }
+                        if self.shutdown_flag.load(Ordering::SeqCst) {
                             break;
                         }
-                        let key_str = format_key_event(&key_event);
-                        let _ = self
-                            .event_sender
-                            .send(AppEvent::KeyPressed(key_str))
-                            .await;
                     }
                     Event::Resize(width, height) => {
                         let _ = self
@@ -126,68 +142,13 @@ impl EventLoop {
     }
 }
 
-fn is_quit_key(key: &KeyEvent) -> bool {
-    use crossterm::event::{KeyCode, KeyModifiers};
-    matches!(
-        key,
-        KeyEvent {
-            code: KeyCode::Char('c'),
-            modifiers: KeyModifiers::CONTROL,
-            ..
-        } | KeyEvent {
-            code: KeyCode::Char('q'),
-            modifiers: KeyModifiers::NONE,
-            ..
-        }
-    )
-}
-
-fn format_key_event(key: &KeyEvent) -> String {
-    use crossterm::event::{KeyCode, KeyModifiers};
-    let mut parts = Vec::new();
-
-    if key.modifiers.contains(KeyModifiers::CONTROL) {
-        parts.push("Ctrl");
-    }
-    if key.modifiers.contains(KeyModifiers::ALT) {
-        parts.push("Alt");
-    }
-    if key.modifiers.contains(KeyModifiers::SHIFT) {
-        parts.push("Shift");
-    }
-
-    let code_str = match key.code {
-        KeyCode::Char(c) => c.to_string(),
-        KeyCode::F(n) => format!("F{n}"),
-        KeyCode::Backspace => "Backspace".to_string(),
-        KeyCode::Enter => "Enter".to_string(),
-        KeyCode::Left => "Left".to_string(),
-        KeyCode::Right => "Right".to_string(),
-        KeyCode::Up => "Up".to_string(),
-        KeyCode::Down => "Down".to_string(),
-        KeyCode::Home => "Home".to_string(),
-        KeyCode::End => "End".to_string(),
-        KeyCode::PageUp => "PageUp".to_string(),
-        KeyCode::PageDown => "PageDown".to_string(),
-        KeyCode::Tab => "Tab".to_string(),
-        KeyCode::BackTab => "BackTab".to_string(),
-        KeyCode::Delete => "Delete".to_string(),
-        KeyCode::Insert => "Insert".to_string(),
-        KeyCode::Esc => "Esc".to_string(),
-        KeyCode::Null => "Null".to_string(),
-        _ => format!("{:?}", key.code),
-    };
-
-    parts.push(&code_str);
-    parts.join("+")
-}
-
 pub struct App {
     terminal: TerminalType,
     _guard: TerminalGuard,
     event_bus: EventBus,
     state_reducer: StateReducer,
     shutdown_flag: Arc<AtomicBool>,
+    input_handler: InputHandler,
 }
 
 impl App {
@@ -195,11 +156,12 @@ impl App {
         let guard = TerminalGuard::enter_raw_mode()?;
         let backend = CrosstermBackend::new(io::stdout());
         let terminal = RatatuiTerminal::new(backend)
-            .map_err(|e| AppError::TerminalInit(io::Error::new(io::ErrorKind::Other, e)))?;
+            .map_err(|e| AppError::TerminalInit(io::Error::other(e)))?;
 
         let event_bus = EventBus::new(100);
         let state_reducer = StateReducer::new();
         let shutdown_flag = Arc::new(AtomicBool::new(false));
+        let input_handler = InputHandler::new();
 
         Ok(Self {
             terminal,
@@ -207,6 +169,7 @@ impl App {
             event_bus,
             state_reducer,
             shutdown_flag,
+            input_handler,
         })
     }
 
@@ -227,9 +190,13 @@ impl App {
     }
 
     pub async fn run(&mut self) -> Result<(), AppError> {
-        let mut event_loop =
-            EventLoop::new(self.event_bus.sender(), self.shutdown_flag.clone());
+        let mut event_loop = EventLoop::with_input_handler(
+            self.event_bus.sender(),
+            self.shutdown_flag.clone(),
+            std::mem::take(&mut self.input_handler),
+        );
         event_loop.run().await?;
+        self.input_handler = event_loop.input_handler;
         Ok(())
     }
 
@@ -403,38 +370,32 @@ mod tests {
     }
 
     #[test]
-    fn test_is_quit_key_ctrl_c() {
+    fn test_input_handler_quit_key_ctrl_c() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut handler = InputHandler::new();
         let key = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert!(is_quit_key(&key));
+        let events = handler.handle_key(key);
+        assert!(!events.is_empty());
+        assert!(matches!(events[0], AppEvent::Quit));
     }
 
     #[test]
-    fn test_is_quit_key_q() {
+    fn test_input_handler_quit_key_q() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut handler = InputHandler::new();
         let key = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
-        assert!(is_quit_key(&key));
+        let events = handler.handle_key(key);
+        assert!(!events.is_empty());
+        assert!(matches!(events[0], AppEvent::Quit));
     }
 
     #[test]
-    fn test_is_not_quit_key_others() {
+    fn test_input_handler_not_quit_key_others() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut handler = InputHandler::new();
         let key = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
-        assert!(!is_quit_key(&key));
-    }
-
-    #[test]
-    fn test_format_key_event_simple() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let key = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
-        assert_eq!(format_key_event(&key), "a");
-    }
-
-    #[test]
-    fn test_format_key_event_with_modifiers() {
-        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-        let key = KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL);
-        assert_eq!(format_key_event(&key), "Ctrl+s");
+        let events = handler.handle_key(key);
+        assert!(!events.contains(&AppEvent::Quit));
     }
 
     #[test]
