@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::request::Request;
 use crate::response::Response;
-use crate::state::{ActivePane, InputMode, NetworkState, AppState, UiState};
+use crate::state::{ActivePane, AppState, InputMode, NetworkState, UiState};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AppEvent {
@@ -68,12 +68,18 @@ impl EventBus {
         self.receiver.take()
     }
 
-    pub async fn send(&self, event: AppEvent) -> Result<(), tokio::sync::mpsc::error::SendError<AppEvent>> {
+    pub async fn send(
+        &self,
+        event: AppEvent,
+    ) -> Result<(), tokio::sync::mpsc::error::SendError<AppEvent>> {
         self.sender.send(event).await
     }
 
     #[allow(clippy::result_large_err)]
-    pub fn try_send(&self, event: AppEvent) -> Result<(), tokio::sync::mpsc::error::TrySendError<AppEvent>> {
+    pub fn try_send(
+        &self,
+        event: AppEvent,
+    ) -> Result<(), tokio::sync::mpsc::error::TrySendError<AppEvent>> {
         self.sender.try_send(event)
     }
 
@@ -581,7 +587,9 @@ mod tests {
             tags: vec![],
         });
 
-        let event = AppEvent::RequestDeleted { id: "1".to_string() };
+        let event = AppEvent::RequestDeleted {
+            id: "1".to_string(),
+        };
         let diff = reducer.reduce(&event);
         assert!(diff.app_state_changed);
         assert!(reducer.app_state.get_request("1").is_none());

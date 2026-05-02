@@ -167,7 +167,10 @@ impl Headers {
     }
 
     pub fn to_pairs(&self) -> Vec<(&str, &str)> {
-        self.headers.iter().map(|h| (h.name.as_str(), h.value.as_str())).collect()
+        self.headers
+            .iter()
+            .map(|h| (h.name.as_str(), h.value.as_str()))
+            .collect()
     }
 }
 
@@ -199,14 +202,8 @@ impl RequestBody {
         match self {
             RequestBody::Raw(s) => s.len(),
             RequestBody::Json(v) => serde_json::to_string(v).map(|s| s.len()).unwrap_or(0),
-            RequestBody::Form(pairs) => pairs
-                .iter()
-                .map(|(k, v)| k.len() + v.len() + 1)
-                .sum(),
-            RequestBody::Multipart(pairs) => pairs
-                .iter()
-                .map(|(k, v)| k.len() + v.len() + 1)
-                .sum(),
+            RequestBody::Form(pairs) => pairs.iter().map(|(k, v)| k.len() + v.len() + 1).sum(),
+            RequestBody::Multipart(pairs) => pairs.iter().map(|(k, v)| k.len() + v.len() + 1).sum(),
             RequestBody::Binary(b) => b.len(),
             RequestBody::None => 0,
         }
@@ -299,7 +296,10 @@ impl Request {
         if let Some(content_type) = self.headers.get("content-type") {
             let body_type = self.body.content_type();
             if let Some(body_type) = body_type {
-                if !content_type.to_lowercase().starts_with(&body_type.to_lowercase()) {
+                if !content_type
+                    .to_lowercase()
+                    .starts_with(&body_type.to_lowercase())
+                {
                     return Err(RequestError::ContentTypeMismatch);
                 }
             }
@@ -442,7 +442,10 @@ mod tests {
     #[test]
     fn test_header_rejects_empty_name() {
         let result = Header::new("", "value");
-        assert_eq!(result.unwrap_err(), RequestError::InvalidHeaderName("".to_string()));
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::InvalidHeaderName("".to_string())
+        );
     }
 
     #[test]
@@ -534,12 +537,21 @@ mod tests {
         headers.add(Header::new("Accept", "application/json").unwrap());
         headers.add(Header::new("Content-Type", "text/plain").unwrap());
         let pairs = headers.to_pairs();
-        assert_eq!(pairs, vec![("Accept", "application/json"), ("Content-Type", "text/plain")]);
+        assert_eq!(
+            pairs,
+            vec![
+                ("Accept", "application/json"),
+                ("Content-Type", "text/plain")
+            ]
+        );
     }
 
     #[test]
     fn test_request_body_content_type() {
-        assert_eq!(RequestBody::Raw("test".to_string()).content_type(), Some("text/plain"));
+        assert_eq!(
+            RequestBody::Raw("test".to_string()).content_type(),
+            Some("text/plain")
+        );
         assert_eq!(
             RequestBody::Json(serde_json::json!({})).content_type(),
             Some("application/json")
@@ -680,7 +692,10 @@ mod tests {
             .url("https://example.com")
             .timeout_secs(0)
             .build();
-        assert_eq!(result.unwrap_err(), RequestError::InvalidTimeout("Timeout must be greater than 0".to_string()));
+        assert_eq!(
+            result.unwrap_err(),
+            RequestError::InvalidTimeout("Timeout must be greater than 0".to_string())
+        );
     }
 
     #[test]
@@ -708,7 +723,10 @@ mod tests {
             body: RequestBody::Json(serde_json::json!({})),
             timeout_secs: 30,
         };
-        assert_eq!(request.validate().unwrap_err(), RequestError::ContentTypeMismatch);
+        assert_eq!(
+            request.validate().unwrap_err(),
+            RequestError::ContentTypeMismatch
+        );
     }
 
     #[test]

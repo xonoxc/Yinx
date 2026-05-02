@@ -1,7 +1,11 @@
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "yinx", version, about = "A terminal HTTP client with streaming and workflow support")]
+#[command(
+    name = "yinx",
+    version,
+    about = "A terminal HTTP client with streaming and workflow support"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,

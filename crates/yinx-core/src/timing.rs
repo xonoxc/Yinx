@@ -245,10 +245,7 @@ mod tests {
 
     #[test]
     fn test_timing_serde_roundtrip() {
-        let timing = Timing::new()
-            .with_dns(10)
-            .with_ttfb(100)
-            .with_total(150);
+        let timing = Timing::new().with_dns(10).with_ttfb(100).with_total(150);
         let json = serde_json::to_string(&timing).unwrap();
         let decoded: Timing = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.dns_ms, timing.dns_ms);

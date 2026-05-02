@@ -1,9 +1,9 @@
-use yinx_core::request::{Request, RequestBody, Headers};
-use yinx_core::response::{Response, ResponseBody, StatusCode};
-use reqwest::Client as ReqwestClient;
 use reqwest::cookie::Jar;
+use reqwest::Client as ReqwestClient;
 use std::sync::Arc;
 use thiserror::Error;
+use yinx_core::request::{Headers, Request, RequestBody};
+use yinx_core::response::{Response, ResponseBody, StatusCode};
 
 #[derive(Error, Debug)]
 pub enum HttpClientError {
@@ -29,11 +29,13 @@ pub struct HttpClient {
 impl HttpClient {
     pub fn new() -> Result<Self, HttpClientError> {
         let cookie_jar = Arc::new(Jar::default());
+
         let _inner = ReqwestClient::builder()
             .redirect(reqwest::redirect::Policy::limited(10))
             .cookie_provider(cookie_jar.clone())
             .build()
             .map_err(HttpClientError::Request)?;
+
         Ok(Self {
             cookie_jar,
             default_timeout_secs: 30,
@@ -78,6 +80,7 @@ impl HttpClient {
 
     pub async fn send_request(&self, request: Request) -> Result<Response, HttpClientError> {
         let client = self.build_client()?;
+
         let mut req_builder = client
             .request(
                 reqwest::Method::from_bytes(request.method.as_str().as_bytes()).unwrap(),
@@ -106,7 +109,9 @@ impl HttpClient {
 
         let response = req_builder.send().await.map_err(HttpClientError::Request)?;
         let status = StatusCode::new(response.status().as_u16());
+
         let mut headers = Headers::new();
+
         for (name, value) in response.headers() {
             let _ = headers.set(name.as_str(), value.to_str().unwrap_or(""));
         }
@@ -138,10 +143,10 @@ impl HttpClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yinx_core::request::RequestBuilder;
-    use yinx_core::request::Method;
-    use wiremock::{MockServer, Mock, ResponseTemplate};
     use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+    use yinx_core::request::Method;
+    use yinx_core::request::RequestBuilder;
 
     #[test]
     fn test_http_client_construction_with_defaults() {
@@ -152,25 +157,19 @@ mod tests {
 
     #[test]
     fn test_http_client_with_custom_timeout() {
-        let client = HttpClient::new()
-            .unwrap()
-            .with_timeout(60);
+        let client = HttpClient::new().unwrap().with_timeout(60);
         assert_eq!(client.default_timeout_secs, 60);
     }
 
     #[test]
     fn test_http_client_with_redirects_disabled() {
-        let client = HttpClient::new()
-            .unwrap()
-            .with_follow_redirects(false);
+        let client = HttpClient::new().unwrap().with_follow_redirects(false);
         assert!(!client.follow_redirects);
     }
 
     #[test]
     fn test_http_client_with_redirects_enabled() {
-        let client = HttpClient::new()
-            .unwrap()
-            .with_follow_redirects(true);
+        let client = HttpClient::new().unwrap().with_follow_redirects(true);
         assert!(client.follow_redirects);
     }
 
@@ -198,10 +197,7 @@ mod tests {
     async fn test_send_request_timeout_triggers_error() {
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_delay(std::time::Duration::from_secs(2))
-            )
+            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(2)))
             .mount(&mock_server)
             .await;
 
@@ -229,10 +225,7 @@ mod tests {
         let redirect_server = MockServer::start().await;
 
         Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(301)
-                    .insert_header("Location", mock_server.uri())
-            )
+            .respond_with(ResponseTemplate::new(301).insert_header("Location", mock_server.uri()))
             .mount(&redirect_server)
             .await;
 
@@ -241,9 +234,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let client = HttpClient::new()
-            .unwrap()
-            .with_follow_redirects(true);
+        let client = HttpClient::new().unwrap().with_follow_redirects(true);
         let request = RequestBuilder::new()
             .method(Method::Get)
             .url(&redirect_server.uri())
@@ -260,15 +251,12 @@ mod tests {
 
         Mock::given(method("GET"))
             .respond_with(
-                ResponseTemplate::new(301)
-                    .insert_header("Location", "http://other.example.com")
+                ResponseTemplate::new(301).insert_header("Location", "http://other.example.com"),
             )
             .mount(&mock_server)
             .await;
 
-        let client = HttpClient::new()
-            .unwrap()
-            .with_follow_redirects(false);
+        let client = HttpClient::new().unwrap().with_follow_redirects(false);
         let request = RequestBuilder::new()
             .method(Method::Get)
             .url(&mock_server.uri())
@@ -305,8 +293,11 @@ mod tests {
         let mut headers = Headers::new();
         let username = "user";
         let password = "pass";
-        let credentials = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
-        headers.set("Authorization", &format!("Basic {}", credentials)).unwrap();
+        let credentials =
+            base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
+        headers
+            .set("Authorization", &format!("Basic {}", credentials))
+            .unwrap();
 
         assert_eq!(
             headers.get("Authorization"),
@@ -318,7 +309,9 @@ mod tests {
     fn test_bearer_auth_header_set() {
         let mut headers = Headers::new();
         let token = "my-secret-token";
-        headers.set("Authorization", &format!("Bearer {}", token)).unwrap();
+        headers
+            .set("Authorization", &format!("Bearer {}", token))
+            .unwrap();
 
         assert_eq!(
             headers.get("Authorization"),
@@ -342,8 +335,7 @@ mod tests {
         // First request sets a cookie
         Mock::given(method("GET"))
             .respond_with(
-                ResponseTemplate::new(200)
-                    .insert_header("Set-Cookie", "session=abc123; Path=/")
+                ResponseTemplate::new(200).insert_header("Set-Cookie", "session=abc123; Path=/"),
             )
             .up_to_n_times(1)
             .mount(&mock_server)
@@ -380,10 +372,7 @@ mod tests {
         let json_body = serde_json::json!({"key": "value"});
 
         Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(&json_body)
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(&json_body))
             .mount(&mock_server)
             .await;
 
@@ -409,7 +398,7 @@ mod tests {
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header("content-type", "text/html")
-                    .set_body_string(html_body)
+                    .set_body_string(html_body),
             )
             .mount(&mock_server)
             .await;
@@ -452,10 +441,7 @@ mod tests {
         let response_body = "Hello, World!";
 
         Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_string(response_body)
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_string(response_body))
             .mount(&mock_server)
             .await;
 
@@ -476,10 +462,7 @@ mod tests {
         let json_body = serde_json::json!({"message": "Hello", "count": 42});
 
         Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(&json_body)
-            )
+            .respond_with(ResponseTemplate::new(200).set_body_json(&json_body))
             .mount(&mock_server)
             .await;
 
@@ -504,7 +487,7 @@ mod tests {
             .respond_with(
                 ResponseTemplate::new(404)
                     .insert_header("content-type", "application/json")
-                    .set_body_string(error_body)
+                    .set_body_string(error_body),
             )
             .mount(&mock_server)
             .await;
@@ -529,10 +512,7 @@ mod tests {
         let error_body = "Internal Server Error";
 
         Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(500)
-                    .set_body_string(error_body)
-            )
+            .respond_with(ResponseTemplate::new(500).set_body_string(error_body))
             .mount(&mock_server)
             .await;
 

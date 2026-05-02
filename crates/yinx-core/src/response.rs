@@ -305,7 +305,10 @@ mod tests {
     fn test_status_code_display() {
         assert_eq!(StatusCode::new(200).to_string(), "200 OK");
         assert_eq!(StatusCode::new(404).to_string(), "404 Not Found");
-        assert_eq!(StatusCode::new(500).to_string(), "500 Internal Server Error");
+        assert_eq!(
+            StatusCode::new(500).to_string(),
+            "500 Internal Server Error"
+        );
         assert_eq!(StatusCode::new(999).to_string(), "999 Unknown");
     }
 
@@ -391,7 +394,10 @@ mod tests {
     #[test]
     fn test_response_body_from_json_value() {
         let body: ResponseBody = serde_json::json!({"key": "value"}).into();
-        assert_eq!(body, ResponseBody::Json(serde_json::json!({"key": "value"})));
+        assert_eq!(
+            body,
+            ResponseBody::Json(serde_json::json!({"key": "value"}))
+        );
     }
 
     #[test]
@@ -505,9 +511,7 @@ mod tests {
     #[test]
     fn test_response_headers_reuse() {
         let mut headers = Headers::new();
-        headers.add(
-            crate::request::Header::new("X-Custom", "value").unwrap(),
-        );
+        headers.add(crate::request::Header::new("X-Custom", "value").unwrap());
         let response = Response::builder().headers(headers).build();
         assert_eq!(response.headers.get("X-Custom"), Some("value"));
     }
