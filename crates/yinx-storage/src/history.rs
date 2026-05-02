@@ -4,9 +4,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
-use yinx_core::state::HistoryEntry;
 use yinx_core::request::Request;
 use yinx_core::response::Response;
+use yinx_core::state::HistoryEntry;
 use yinx_core::timing::Timing;
 
 #[derive(Debug, Error)]
@@ -138,8 +138,8 @@ impl HistoryStore {
             if line.trim().is_empty() {
                 continue;
             }
-            let hl: HistoryLine = serde_json::from_str(&line)
-                .map_err(|_| HistoryError::InvalidFormat(0))?;
+            let hl: HistoryLine =
+                serde_json::from_str(&line).map_err(|_| HistoryError::InvalidFormat(0))?;
             if hl.id == id {
                 return Ok(Some(hl.into()));
             }
@@ -156,8 +156,8 @@ impl HistoryStore {
             if line.trim().is_empty() {
                 continue;
             }
-            let hl: HistoryLine = serde_json::from_str(&line)
-                .map_err(|_| HistoryError::InvalidFormat(0))?;
+            let hl: HistoryLine =
+                serde_json::from_str(&line).map_err(|_| HistoryError::InvalidFormat(0))?;
             if hl.request.url.as_str().contains(url_pattern) {
                 results.push(hl.into());
             }
@@ -174,8 +174,8 @@ impl HistoryStore {
             if line.trim().is_empty() {
                 continue;
             }
-            let hl: HistoryLine = serde_json::from_str(&line)
-                .map_err(|_| HistoryError::InvalidFormat(0))?;
+            let hl: HistoryLine =
+                serde_json::from_str(&line).map_err(|_| HistoryError::InvalidFormat(0))?;
             if let Some(ref response) = hl.response {
                 if response.status.0 == status {
                     results.push(hl.into());
@@ -198,8 +198,8 @@ impl HistoryStore {
             if line.trim().is_empty() {
                 continue;
             }
-            let hl: HistoryLine = serde_json::from_str(&line)
-                .map_err(|_| HistoryError::InvalidFormat(0))?;
+            let hl: HistoryLine =
+                serde_json::from_str(&line).map_err(|_| HistoryError::InvalidFormat(0))?;
             if hl.timestamp >= start && hl.timestamp <= end {
                 results.push(hl.into());
             }
@@ -396,7 +396,10 @@ mod tests {
         store.append(&entry).unwrap();
         let request = store.replay_request(&id).unwrap();
         assert!(request.is_some());
-        assert_eq!(request.unwrap().url.as_str(), "https://api.example.com/users");
+        assert_eq!(
+            request.unwrap().url.as_str(),
+            "https://api.example.com/users"
+        );
     }
 
     #[test]

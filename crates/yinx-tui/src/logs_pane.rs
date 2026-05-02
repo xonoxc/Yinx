@@ -1,13 +1,15 @@
-use std::collections::VecDeque;
 use chrono::{DateTime, Utc};
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{BarChart, Block, Borders, BorderType, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    widgets::{
+        BarChart, Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap,
+    },
     Frame,
 };
-use crossterm::event::{KeyCode, KeyModifiers};
+use std::collections::VecDeque;
 
 use yinx_core::timing::{RequestMetrics, Timing};
 
@@ -23,7 +25,12 @@ pub enum LogsTab {
 
 impl LogsTab {
     pub fn all() -> Vec<LogsTab> {
-        vec![LogsTab::Logs, LogsTab::Metrics, LogsTab::Histogram, LogsTab::Errors]
+        vec![
+            LogsTab::Logs,
+            LogsTab::Metrics,
+            LogsTab::Histogram,
+            LogsTab::Errors,
+        ]
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -55,7 +62,12 @@ impl LogLevel {
     }
 
     pub fn all() -> Vec<LogLevel> {
-        vec![LogLevel::Debug, LogLevel::Info, LogLevel::Warning, LogLevel::Error]
+        vec![
+            LogLevel::Debug,
+            LogLevel::Info,
+            LogLevel::Warning,
+            LogLevel::Error,
+        ]
     }
 }
 
@@ -288,7 +300,8 @@ impl LogsPane {
                 true
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                self.selected_error = (self.selected_error + 1).min(self.errors.len().saturating_sub(1));
+                self.selected_error =
+                    (self.selected_error + 1).min(self.errors.len().saturating_sub(1));
                 true
             }
             KeyCode::Char('g') => {
@@ -326,10 +339,7 @@ impl LogsPane {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(vec![
-                Constraint::Length(3),
-                Constraint::Min(0),
-            ])
+            .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
             .split(inner);
 
         self.render_tabs(frame, chunks[0], theme);
@@ -382,9 +392,15 @@ impl LogsPane {
                 };
 
                 let spans = vec![
-                    Span::styled(entry.format_timestamp(), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::styled(
+                        entry.format_timestamp(),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
                     Span::raw(" "),
-                    Span::styled(entry.level.as_str(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        entry.level.as_str(),
+                        Style::default().fg(color).add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(" "),
                     Span::styled(&entry.message, Style::default().fg(color)),
                 ];
@@ -443,7 +459,12 @@ impl LogsPane {
 
                 lines.push(Line::from(vec![
                     Span::styled("Status: ", Style::default().fg(theme.foreground.as_color())),
-                    Span::styled(status.to_string(), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        status.to_string(),
+                        Style::default()
+                            .fg(status_color)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                 ]));
             }
 
@@ -452,42 +473,66 @@ impl LogsPane {
             if let Some(ttfb) = timing.ttfb_ms {
                 lines.push(Line::from(vec![
                     Span::styled("TTFB: ", Style::default().fg(theme.foreground.as_color())),
-                    Span::styled(format!("{}ms", ttfb), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::styled(
+                        format!("{}ms", ttfb),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
                 ]));
             }
 
             if let Some(total) = timing.total_ms {
                 lines.push(Line::from(vec![
-                    Span::styled("Duration: ", Style::default().fg(theme.foreground.as_color())),
-                    Span::styled(format!("{}ms", total), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::styled(
+                        "Duration: ",
+                        Style::default().fg(theme.foreground.as_color()),
+                    ),
+                    Span::styled(
+                        format!("{}ms", total),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
                 ]));
             }
 
             if let Some(dns) = timing.dns_ms {
                 lines.push(Line::from(vec![
                     Span::styled("DNS: ", Style::default().fg(theme.foreground.as_color())),
-                    Span::styled(format!("{}ms", dns), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::styled(
+                        format!("{}ms", dns),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
                 ]));
             }
 
             if let Some(connect) = timing.connect_ms {
                 lines.push(Line::from(vec![
-                    Span::styled("Connect: ", Style::default().fg(theme.foreground.as_color())),
-                    Span::styled(format!("{}ms", connect), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::styled(
+                        "Connect: ",
+                        Style::default().fg(theme.foreground.as_color()),
+                    ),
+                    Span::styled(
+                        format!("{}ms", connect),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
                 ]));
             }
 
             if let Some(tls) = timing.tls_ms {
                 lines.push(Line::from(vec![
                     Span::styled("TLS: ", Style::default().fg(theme.foreground.as_color())),
-                    Span::styled(format!("{}ms", tls), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::styled(
+                        format!("{}ms", tls),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
                 ]));
             }
 
             // Body size
             if metrics.body_size > 0 {
                 lines.push(Line::from(vec![
-                    Span::styled("Body Size: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        "Body Size: ",
+                        Style::default().fg(theme.foreground.as_color()),
+                    ),
                     Span::styled(
                         format_bytes(metrics.body_size),
                         Style::default().fg(theme.semantic.info.as_color()),
@@ -498,7 +543,10 @@ impl LogsPane {
             // Retries
             if metrics.retries > 0 {
                 lines.push(Line::from(vec![
-                    Span::styled("Retries: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        "Retries: ",
+                        Style::default().fg(theme.foreground.as_color()),
+                    ),
                     Span::styled(
                         metrics.retries.to_string(),
                         Style::default().fg(theme.semantic.warning.as_color()),
@@ -533,15 +581,16 @@ impl LogsPane {
 
     fn render_histogram(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if self.chunk_intervals.is_empty() {
-            let paragraph = Paragraph::new("No chunk data available. Start streaming to see the histogram.")
-                .style(Style::default().fg(theme.foreground.as_color()))
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.background.as_color())),
-                )
-                .alignment(Alignment::Center);
+            let paragraph =
+                Paragraph::new("No chunk data available. Start streaming to see the histogram.")
+                    .style(Style::default().fg(theme.foreground.as_color()))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(theme.border.color.as_color()))
+                            .style(Style::default().bg(theme.pane.background.as_color())),
+                    )
+                    .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
             return;
@@ -555,7 +604,8 @@ impl LogsPane {
 
         let mut buckets = vec![0u64; bucket_count];
         for &interval in &intervals {
-            let bucket_idx = ((interval as f64 / bucket_size as f64).floor() as usize).min(bucket_count - 1);
+            let bucket_idx =
+                ((interval as f64 / bucket_size as f64).floor() as usize).min(bucket_count - 1);
             buckets[bucket_idx] += 1;
         }
 
@@ -613,11 +663,22 @@ impl LogsPane {
             .iter()
             .map(|entry| {
                 let mut spans = vec![
-                    Span::styled(entry.format_timestamp(), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::styled(
+                        entry.format_timestamp(),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
                     Span::raw(" "),
-                    Span::styled("ERROR", Style::default().fg(theme.semantic.error.as_color()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "ERROR",
+                        Style::default()
+                            .fg(theme.semantic.error.as_color())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::raw(" "),
-                    Span::styled(&entry.message, Style::default().fg(theme.semantic.error.as_color())),
+                    Span::styled(
+                        &entry.message,
+                        Style::default().fg(theme.semantic.error.as_color()),
+                    ),
                 ];
 
                 if let Some(ref context) = entry.context {
@@ -668,8 +729,8 @@ fn format_bytes(bytes: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-use yinx_core::timing::RequestMetrics;
     use crossterm::event::{KeyCode, KeyModifiers};
+    use yinx_core::timing::RequestMetrics;
 
     #[test]
     fn test_logs_tab_all() {
@@ -709,8 +770,8 @@ use yinx_core::timing::RequestMetrics;
 
     #[test]
     fn test_log_entry_with_context() {
-        let entry = LogEntry::new(LogLevel::Error, "error occurred")
-            .with_context("stack trace here");
+        let entry =
+            LogEntry::new(LogLevel::Error, "error occurred").with_context("stack trace here");
         assert_eq!(entry.context, Some("stack trace here".to_string()));
     }
 
@@ -759,9 +820,7 @@ use yinx_core::timing::RequestMetrics;
     #[test]
     fn test_logs_pane_set_metrics() {
         let mut pane = LogsPane::new();
-        let timing = Timing::new()
-            .with_ttfb(100)
-            .with_total(200);
+        let timing = Timing::new().with_ttfb(100).with_total(200);
         let metrics = RequestMetrics::new()
             .with_timing(timing)
             .with_status_code(200);
@@ -848,7 +907,10 @@ use yinx_core::timing::RequestMetrics;
         pane.add_log(LogLevel::Error, "err1");
         pane.add_log(LogLevel::Error, "err2");
         pane.selected_error = 1;
-        pane.selected_tab = LogsTab::all().iter().position(|&t| t == LogsTab::Errors).unwrap();
+        pane.selected_tab = LogsTab::all()
+            .iter()
+            .position(|&t| t == LogsTab::Errors)
+            .unwrap();
         assert!(pane.handle_key(KeyCode::Up, KeyModifiers::NONE));
         assert_eq!(pane.selected_error, 0);
     }

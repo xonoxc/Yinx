@@ -3,14 +3,19 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, Tabs, Wrap},
+    widgets::{
+        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
+        Tabs, Wrap,
+    },
     Frame,
 };
+use serde::{Deserialize, Serialize};
 
-use yinx_core::request::{Method, Headers, RequestBody};
+use yinx_core::request::{Header, Headers, Method, RequestBody, RequestUrl};
 
-use crate::theme::Theme;
+use crate::editor::{EditorError, EditorFormat};
 use crate::input::InputBuffer;
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestTab {
@@ -22,7 +27,12 @@ pub enum RequestTab {
 
 impl RequestTab {
     pub fn all() -> Vec<RequestTab> {
-        vec![RequestTab::Headers, RequestTab::Body, RequestTab::Auth, RequestTab::Params]
+        vec![
+            RequestTab::Headers,
+            RequestTab::Body,
+            RequestTab::Auth,
+            RequestTab::Params,
+        ]
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -83,8 +93,43 @@ impl AuthType {
     }
 
     pub fn all() -> Vec<AuthType> {
-        vec![AuthType::None, AuthType::Basic, AuthType::Bearer, AuthType::ApiKey]
+        vec![
+            AuthType::None,
+            AuthType::Basic,
+            AuthType::Bearer,
+            AuthType::ApiKey,
+        ]
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditableField {
+    Url,
+    Body,
+    Headers,
+    HeaderName(usize),
+    HeaderValue(usize),
+    AuthType,
+    AuthUsername,
+    AuthPassword,
+    AuthToken,
+    AuthKeyName,
+    AuthKeyValue,
+    ParamKey(usize),
+    ParamValue(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestPaneEditSpec {
+    pub field: EditableField,
+    pub format: EditorFormat,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct SerializableHeader {
+    name: String,
+    value: String,
 }
 
 pub struct RequestPane {
@@ -203,7 +248,8 @@ impl RequestPane {
             }
             RequestBody::Json(v) => {
                 self.body_type = BodyType::Json;
-                self.body_content = InputBuffer::with_content(&serde_json::to_string_pretty(v).unwrap_or_default());
+                self.body_content =
+                    InputBuffer::with_content(&serde_json::to_string_pretty(v).unwrap_or_default());
             }
             RequestBody::Form(_pairs) => {
                 self.body_type = BodyType::Form;
@@ -245,11 +291,9 @@ impl RequestPane {
     pub fn body(&self) -> RequestBody {
         match self.body_type {
             BodyType::Raw => RequestBody::Raw(self.body_content.as_str().to_string()),
-            BodyType::Json => {
-                serde_json::from_str(self.body_content.as_str())
-                    .map(RequestBody::Json)
-                    .unwrap_or(RequestBody::Raw(self.body_content.as_str().to_string()))
-            }
+            BodyType::Json => serde_json::from_str(self.body_content.as_str())
+                .map(RequestBody::Json)
+                .unwrap_or(RequestBody::Raw(self.body_content.as_str().to_string())),
             BodyType::Form => RequestBody::Form(
                 self.params
                     .iter()
@@ -274,6 +318,264 @@ impl RequestPane {
         self.focused_field
     }
 
+    pub fn editor_spec_for_focused_field(&self) -> Result<RequestPaneEditSpec, EditorError> {
+        self.editor_spec_for(self.focused_editable_field())
+    }
+
+    pub fn focused_editable_field(&self) -> EditableField {
+        match self.focused_field {
+            FocusedField::Url | FocusedField::Method => EditableField::Url,
+            FocusedField::Tabs => match RequestTab::all()[self.selected_tab] {
+                RequestTab::Headers => EditableField::Headers,
+                RequestTab::Body => EditableField::Body,
+                RequestTab::Auth => self.current_auth_editable_field(),
+                RequestTab::Params => EditableField::ParamKey(self.param_selected),
+            },
+            FocusedField::TabContent => match RequestTab::all()[self.selected_tab] {
+                RequestTab::Headers => match self.header_field_focus {
+                    HeaderField::Name => EditableField::HeaderName(self.header_selected),
+                    HeaderField::Value => EditableField::HeaderValue(self.header_selected),
+                },
+                RequestTab::Body => EditableField::Body,
+                RequestTab::Auth => self.current_auth_editable_field(),
+                RequestTab::Params => match self.param_field_focus {
+                    ParamField::Key => EditableField::ParamKey(self.param_selected),
+                    ParamField::Value => EditableField::ParamValue(self.param_selected),
+                },
+            },
+        }
+    }
+
+    pub fn editor_spec_for(
+        &self,
+        field: EditableField,
+    ) -> Result<RequestPaneEditSpec, EditorError> {
+        let spec = match field {
+            EditableField::Url => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.url(),
+            },
+            EditableField::Body => match self.body_type {
+                BodyType::Json => RequestPaneEditSpec {
+                    field,
+                    format: EditorFormat::Json,
+                    content: self.body_content.as_str().to_string(),
+                },
+                BodyType::Form => RequestPaneEditSpec {
+                    field,
+                    format: EditorFormat::Yaml,
+                    content: serde_yaml::to_string(&self.serializable_params())
+                        .map_err(|err| EditorError::Validation(err.to_string()))?,
+                },
+                BodyType::Raw => RequestPaneEditSpec {
+                    field,
+                    format: EditorFormat::Text,
+                    content: self.body_content.as_str().to_string(),
+                },
+            },
+            EditableField::Headers => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Yaml,
+                content: serde_yaml::to_string(&self.serializable_headers())
+                    .map_err(|err| EditorError::Validation(err.to_string()))?,
+            },
+            EditableField::HeaderName(index) => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.header_buffers(index)?.0.as_str().to_string(),
+            },
+            EditableField::HeaderValue(index) => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.header_buffers(index)?.1.as_str().to_string(),
+            },
+            EditableField::AuthUsername => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.auth_username.as_str().to_string(),
+            },
+            EditableField::AuthType => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.auth_type.as_str().to_string(),
+            },
+            EditableField::AuthPassword => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.auth_password.as_str().to_string(),
+            },
+            EditableField::AuthToken => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.auth_token.as_str().to_string(),
+            },
+            EditableField::AuthKeyName => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.auth_key_name.as_str().to_string(),
+            },
+            EditableField::AuthKeyValue => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.auth_key_value.as_str().to_string(),
+            },
+            EditableField::ParamKey(index) => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.param_buffers(index)?.0.as_str().to_string(),
+            },
+            EditableField::ParamValue(index) => RequestPaneEditSpec {
+                field,
+                format: EditorFormat::Text,
+                content: self.param_buffers(index)?.1.as_str().to_string(),
+            },
+        };
+
+        Ok(spec)
+    }
+
+    pub fn validate_editor_content(
+        &self,
+        field: EditableField,
+        content: &str,
+    ) -> Result<(), EditorError> {
+        match field {
+            EditableField::Url => RequestUrl::new(normalize_single_line(content))
+                .map(|_| ())
+                .map_err(|err| EditorError::Validation(err.to_string())),
+            EditableField::Body => match self.body_type {
+                BodyType::Json => serde_json::from_str::<serde_json::Value>(content)
+                    .map(|_| ())
+                    .map_err(|err| EditorError::Validation(err.to_string())),
+                BodyType::Form => {
+                    let params: Vec<SerializableHeader> = serde_yaml::from_str(content)
+                        .map_err(|err| EditorError::Validation(err.to_string()))?;
+                    for param in params {
+                        if param.name.trim().is_empty() {
+                            return Err(EditorError::Validation(
+                                "Form keys cannot be empty".to_string(),
+                            ));
+                        }
+                    }
+                    Ok(())
+                }
+                BodyType::Raw => Ok(()),
+            },
+            EditableField::Headers => {
+                let headers: Vec<SerializableHeader> = serde_yaml::from_str(content)
+                    .map_err(|err| EditorError::Validation(err.to_string()))?;
+                for header in headers {
+                    Header::new(header.name, header.value)
+                        .map_err(|err| EditorError::Validation(err.to_string()))?;
+                }
+                Ok(())
+            }
+            EditableField::HeaderName(_) => Header::new(normalize_single_line(content), "")
+                .map(|_| ())
+                .map_err(|err| EditorError::Validation(err.to_string())),
+            EditableField::AuthType => parse_auth_type(normalize_single_line(content)).map(|_| ()),
+            EditableField::HeaderValue(_)
+            | EditableField::AuthUsername
+            | EditableField::AuthPassword
+            | EditableField::AuthToken
+            | EditableField::AuthKeyName
+            | EditableField::AuthKeyValue
+            | EditableField::ParamValue(_) => Ok(()),
+            EditableField::ParamKey(_) => Ok(()),
+        }
+    }
+
+    pub fn apply_edited_content(
+        &mut self,
+        field: EditableField,
+        content: &str,
+    ) -> Result<(), EditorError> {
+        self.validate_editor_content(field, content)?;
+
+        match field {
+            EditableField::Url => {
+                self.url_buffer = InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::Body => match self.body_type {
+                BodyType::Json | BodyType::Raw => {
+                    self.body_content = InputBuffer::with_content(content);
+                }
+                BodyType::Form => {
+                    let params: Vec<SerializableHeader> = serde_yaml::from_str(content)
+                        .map_err(|err| EditorError::Validation(err.to_string()))?;
+                    self.params = params
+                        .into_iter()
+                        .map(|param| {
+                            (
+                                InputBuffer::with_content(&param.name),
+                                InputBuffer::with_content(&param.value),
+                            )
+                        })
+                        .collect();
+                    if self.params.is_empty() {
+                        self.params.push((InputBuffer::new(), InputBuffer::new()));
+                    }
+                    self.param_selected = self.param_selected.min(self.params.len() - 1);
+                    self.body_content = InputBuffer::with_content(content);
+                }
+            },
+            EditableField::Headers => {
+                let headers: Vec<SerializableHeader> = serde_yaml::from_str(content)
+                    .map_err(|err| EditorError::Validation(err.to_string()))?;
+                self.headers = headers
+                    .into_iter()
+                    .map(|header| {
+                        (
+                            InputBuffer::with_content(&header.name),
+                            InputBuffer::with_content(&header.value),
+                        )
+                    })
+                    .collect();
+                if self.headers.is_empty() {
+                    self.headers.push((InputBuffer::new(), InputBuffer::new()));
+                }
+                self.header_selected = self.header_selected.min(self.headers.len() - 1);
+            }
+            EditableField::HeaderName(index) => {
+                self.header_buffers_mut(index)?.0 =
+                    InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::HeaderValue(index) => {
+                self.header_buffers_mut(index)?.1 =
+                    InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::AuthType => {
+                self.auth_type = parse_auth_type(normalize_single_line(content))?;
+            }
+            EditableField::AuthUsername => {
+                self.auth_username = InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::AuthPassword => {
+                self.auth_password = InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::AuthToken => {
+                self.auth_token = InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::AuthKeyName => {
+                self.auth_key_name = InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::AuthKeyValue => {
+                self.auth_key_value = InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::ParamKey(index) => {
+                self.param_buffers_mut(index)?.0 =
+                    InputBuffer::with_content(normalize_single_line(content));
+            }
+            EditableField::ParamValue(index) => {
+                self.param_buffers_mut(index)?.1 =
+                    InputBuffer::with_content(normalize_single_line(content));
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn handle_key(&mut self, key_code: KeyCode, _modifiers: KeyModifiers) -> bool {
         if self.method_popup_visible {
             return self.handle_method_popup_key(key_code);
@@ -295,7 +597,10 @@ impl RequestPane {
         match key_code {
             KeyCode::Enter => {
                 self.method_popup_visible = true;
-                let current_idx = Method::all().iter().position(|m| *m == self.method).unwrap_or(0);
+                let current_idx = Method::all()
+                    .iter()
+                    .position(|m| *m == self.method)
+                    .unwrap_or(0);
                 self.method_list_state.select(Some(current_idx));
                 true
             }
@@ -441,8 +746,12 @@ impl RequestPane {
             KeyCode::Backspace => {
                 let (name_buf, value_buf) = &mut self.headers[self.header_selected];
                 match self.header_field_focus {
-                    HeaderField::Name => { name_buf.delete_char(); },
-                    HeaderField::Value => { value_buf.delete_char(); },
+                    HeaderField::Name => {
+                        name_buf.delete_char();
+                    }
+                    HeaderField::Value => {
+                        value_buf.delete_char();
+                    }
                 }
                 true
             }
@@ -532,11 +841,21 @@ impl RequestPane {
             }
             KeyCode::Backspace => {
                 match self.auth_field_focus {
-                    AuthField::Username => { self.auth_username.delete_char(); },
-                    AuthField::Password => { self.auth_password.delete_char(); },
-                    AuthField::Token => { self.auth_token.delete_char(); },
-                    AuthField::KeyName => { self.auth_key_name.delete_char(); },
-                    AuthField::KeyValue => { self.auth_key_value.delete_char(); },
+                    AuthField::Username => {
+                        self.auth_username.delete_char();
+                    }
+                    AuthField::Password => {
+                        self.auth_password.delete_char();
+                    }
+                    AuthField::Token => {
+                        self.auth_token.delete_char();
+                    }
+                    AuthField::KeyName => {
+                        self.auth_key_name.delete_char();
+                    }
+                    AuthField::KeyValue => {
+                        self.auth_key_value.delete_char();
+                    }
                     _ => {}
                 }
                 true
@@ -601,8 +920,12 @@ impl RequestPane {
             KeyCode::Backspace => {
                 let (key_buf, value_buf) = &mut self.params[self.param_selected];
                 match self.param_field_focus {
-                    ParamField::Key => { key_buf.delete_char(); },
-                    ParamField::Value => { value_buf.delete_char(); },
+                    ParamField::Key => {
+                        key_buf.delete_char();
+                    }
+                    ParamField::Value => {
+                        value_buf.delete_char();
+                    }
                 }
                 true
             }
@@ -697,6 +1020,81 @@ impl RequestPane {
             .collect()
     }
 
+    fn current_auth_editable_field(&self) -> EditableField {
+        match self.auth_field_focus {
+            AuthField::Type => EditableField::AuthType,
+            AuthField::Token => EditableField::AuthToken,
+            AuthField::Username => EditableField::AuthUsername,
+            AuthField::Password => EditableField::AuthPassword,
+            AuthField::KeyName => EditableField::AuthKeyName,
+            AuthField::KeyValue => EditableField::AuthKeyValue,
+        }
+    }
+
+    fn serializable_headers(&self) -> Vec<SerializableHeader> {
+        self.headers
+            .iter()
+            .filter_map(|(name, value)| {
+                let name = name.as_str().trim();
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(SerializableHeader {
+                        name: name.to_string(),
+                        value: value.as_str().to_string(),
+                    })
+                }
+            })
+            .collect()
+    }
+
+    fn serializable_params(&self) -> Vec<SerializableHeader> {
+        self.params
+            .iter()
+            .filter_map(|(name, value)| {
+                let name = name.as_str().trim();
+                if name.is_empty() {
+                    None
+                } else {
+                    Some(SerializableHeader {
+                        name: name.to_string(),
+                        value: value.as_str().to_string(),
+                    })
+                }
+            })
+            .collect()
+    }
+
+    fn header_buffers(&self, index: usize) -> Result<&(InputBuffer, InputBuffer), EditorError> {
+        self.headers.get(index).ok_or_else(|| {
+            EditorError::Validation(format!("Header index {index} is out of bounds"))
+        })
+    }
+
+    fn header_buffers_mut(
+        &mut self,
+        index: usize,
+    ) -> Result<&mut (InputBuffer, InputBuffer), EditorError> {
+        self.headers.get_mut(index).ok_or_else(|| {
+            EditorError::Validation(format!("Header index {index} is out of bounds"))
+        })
+    }
+
+    fn param_buffers(&self, index: usize) -> Result<&(InputBuffer, InputBuffer), EditorError> {
+        self.params
+            .get(index)
+            .ok_or_else(|| EditorError::Validation(format!("Param index {index} is out of bounds")))
+    }
+
+    fn param_buffers_mut(
+        &mut self,
+        index: usize,
+    ) -> Result<&mut (InputBuffer, InputBuffer), EditorError> {
+        self.params
+            .get_mut(index)
+            .ok_or_else(|| EditorError::Validation(format!("Param index {index} is out of bounds")))
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
         let border_color = if is_active {
             theme.border.active_color.as_color()
@@ -749,10 +1147,7 @@ impl RequestPane {
 
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(vec![
-                Constraint::Length(10),
-                Constraint::Min(0),
-            ])
+            .constraints(vec![Constraint::Length(10), Constraint::Min(0)])
             .split(area);
 
         let method_text = self.method.as_str();
@@ -762,8 +1157,7 @@ impl RequestPane {
                 .bg(theme.highlight.selected_bg.as_color())
                 .add_modifier(Modifier::BOLD)
         } else {
-            Style::default()
-                .fg(theme.foreground.as_color())
+            Style::default().fg(theme.foreground.as_color())
         };
 
         let method_block = Block::default()
@@ -802,7 +1196,9 @@ impl RequestPane {
         frame.render_widget(url_para, chunks[1]);
 
         if url_focused {
-            let x_offset = self.url_buffer.as_str()[..self.url_buffer.cursor_pos].chars().count() as u16;
+            let x_offset = self.url_buffer.as_str()[..self.url_buffer.cursor_pos]
+                .chars()
+                .count() as u16;
             frame.set_cursor_position(ratatui::prelude::Position::new(
                 chunks[1].x + 1 + x_offset,
                 chunks[1].y + 1,
@@ -816,13 +1212,17 @@ impl RequestPane {
 
         let tabs_widget = Tabs::new(titles)
             .select(self.selected_tab)
-            .block(Block::default().borders(Borders::ALL).border_style(
-                Style::default().fg(if is_active && self.focused_field == FocusedField::Tabs {
-                    theme.border.active_color.as_color()
-                } else {
-                    theme.border.color.as_color()
-                }),
-            ))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(
+                        if is_active && self.focused_field == FocusedField::Tabs {
+                            theme.border.active_color.as_color()
+                        } else {
+                            theme.border.color.as_color()
+                        },
+                    )),
+            )
             .style(Style::default().bg(theme.pane.background.as_color()))
             .highlight_style(
                 Style::default()
@@ -846,17 +1246,20 @@ impl RequestPane {
     }
 
     fn render_headers_tab(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        let header = Row::new(vec![
-            Cell::from("Name"),
-            Cell::from("Value"),
-        ])
-        .style(Style::default().fg(theme.pane.title.as_color()).add_modifier(Modifier::BOLD));
+        let header = Row::new(vec![Cell::from("Name"), Cell::from("Value")]).style(
+            Style::default()
+                .fg(theme.pane.title.as_color())
+                .add_modifier(Modifier::BOLD),
+        );
 
-        let rows: Vec<Row> = self.headers
+        let rows: Vec<Row> = self
+            .headers
             .iter()
             .enumerate()
             .map(|(i, (name, value))| {
-                let is_selected = is_active && self.focused_field == FocusedField::TabContent && self.header_selected == i;
+                let is_selected = is_active
+                    && self.focused_field == FocusedField::TabContent
+                    && self.header_selected == i;
                 let style = if is_selected {
                     Style::default()
                         .bg(theme.highlight.selected_bg.as_color())
@@ -891,20 +1294,23 @@ impl RequestPane {
             })
             .collect();
 
-        let table = Table::new(rows, &[Constraint::Percentage(40), Constraint::Percentage(60)])
-            .header(header)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color()))
-                    .title("Headers (a=add, d=delete, ←→ to switch field)"),
-            )
-            .row_highlight_style(
-                Style::default()
-                    .bg(theme.highlight.selected_bg.as_color())
-                    .fg(theme.highlight.selected_fg.as_color()),
-            );
+        let table = Table::new(
+            rows,
+            &[Constraint::Percentage(40), Constraint::Percentage(60)],
+        )
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .style(Style::default().bg(theme.pane.background.as_color()))
+                .title("Headers (a=add, d=delete, ←→ to switch field)"),
+        )
+        .row_highlight_style(
+            Style::default()
+                .bg(theme.highlight.selected_bg.as_color())
+                .fg(theme.highlight.selected_fg.as_color()),
+        );
 
         let mut state = ratatui::widgets::TableState::default();
         if is_active && self.focused_field == FocusedField::TabContent {
@@ -917,14 +1323,14 @@ impl RequestPane {
     fn render_body_tab(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(vec![
-                Constraint::Length(3),
-                Constraint::Min(0),
-            ])
+            .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
             .split(area);
 
         let body_type_str = self.body_type.as_str();
-        let type_style = if is_active && self.focused_field == FocusedField::TabContent && self.auth_field_focus == AuthField::Type {
+        let type_style = if is_active
+            && self.focused_field == FocusedField::TabContent
+            && self.auth_field_focus == AuthField::Type
+        {
             Style::default()
                 .fg(theme.highlight.selected_fg.as_color())
                 .bg(theme.highlight.selected_bg.as_color())
@@ -967,7 +1373,9 @@ impl RequestPane {
         frame.render_widget(body_para, chunks[1]);
 
         if is_active && self.focused_field == FocusedField::TabContent {
-            let x_offset = self.body_content.as_str()[..self.body_content.cursor_pos].chars().count() as u16;
+            let x_offset = self.body_content.as_str()[..self.body_content.cursor_pos]
+                .chars()
+                .count() as u16;
             frame.set_cursor_position(ratatui::prelude::Position::new(
                 chunks[1].x + 1 + x_offset,
                 chunks[1].y + 1,
@@ -981,10 +1389,7 @@ impl RequestPane {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(vec![
-                Constraint::Length(3),
-                Constraint::Min(0),
-            ])
+            .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
             .split(area);
 
         let type_style = if is_focused && self.auth_field_focus == AuthField::Type {
@@ -996,7 +1401,12 @@ impl RequestPane {
         };
 
         let type_para = Paragraph::new(Line::from(vec![
-            Span::styled("Type: ", Style::default().fg(theme.pane.title.as_color()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Type: ",
+                Style::default()
+                    .fg(theme.pane.title.as_color())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(auth_type_str, type_style),
             Span::raw(" (press 't' to change)"),
         ]))
@@ -1025,10 +1435,7 @@ impl RequestPane {
             AuthType::Basic => {
                 let inner_chunks = Layout::default()
                     .direction(Direction::Vertical)
-                    .constraints(vec![
-                        Constraint::Length(3),
-                        Constraint::Length(3),
-                    ])
+                    .constraints(vec![Constraint::Length(3), Constraint::Length(3)])
                     .split(chunks[1]);
 
                 let user_style = if is_focused && self.auth_field_focus == AuthField::Username {
@@ -1051,11 +1458,13 @@ impl RequestPane {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(if is_focused && self.auth_field_focus == AuthField::Username {
-                                Style::default().fg(theme.border.active_color.as_color())
-                            } else {
-                                Style::default().fg(theme.border.color.as_color())
-                            })
+                            .border_style(
+                                if is_focused && self.auth_field_focus == AuthField::Username {
+                                    Style::default().fg(theme.border.active_color.as_color())
+                                } else {
+                                    Style::default().fg(theme.border.color.as_color())
+                                },
+                            )
                             .style(Style::default().bg(theme.highlight.bg.as_color()))
                             .title("Username"),
                     )
@@ -1067,11 +1476,13 @@ impl RequestPane {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(if is_focused && self.auth_field_focus == AuthField::Password {
-                                Style::default().fg(theme.border.active_color.as_color())
-                            } else {
-                                Style::default().fg(theme.border.color.as_color())
-                            })
+                            .border_style(
+                                if is_focused && self.auth_field_focus == AuthField::Password {
+                                    Style::default().fg(theme.border.active_color.as_color())
+                                } else {
+                                    Style::default().fg(theme.border.color.as_color())
+                                },
+                            )
                             .style(Style::default().bg(theme.highlight.bg.as_color()))
                             .title("Password"),
                     )
@@ -1080,13 +1491,17 @@ impl RequestPane {
                 frame.render_widget(pass_para, inner_chunks[1]);
 
                 if is_focused && self.auth_field_focus == AuthField::Username {
-                    let x_offset = self.auth_username.as_str()[..self.auth_username.cursor_pos].chars().count() as u16;
+                    let x_offset = self.auth_username.as_str()[..self.auth_username.cursor_pos]
+                        .chars()
+                        .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
                         inner_chunks[0].x + 1 + x_offset,
                         inner_chunks[0].y + 1,
                     ));
                 } else if is_focused && self.auth_field_focus == AuthField::Password {
-                    let x_offset = self.auth_password.as_str()[..self.auth_password.cursor_pos].chars().count() as u16;
+                    let x_offset = self.auth_password.as_str()[..self.auth_password.cursor_pos]
+                        .chars()
+                        .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
                         inner_chunks[1].x + 1 + x_offset,
                         inner_chunks[1].y + 1,
@@ -1106,11 +1521,13 @@ impl RequestPane {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(if is_focused && self.auth_field_focus == AuthField::Token {
-                                Style::default().fg(theme.border.active_color.as_color())
-                            } else {
-                                Style::default().fg(theme.border.color.as_color())
-                            })
+                            .border_style(
+                                if is_focused && self.auth_field_focus == AuthField::Token {
+                                    Style::default().fg(theme.border.active_color.as_color())
+                                } else {
+                                    Style::default().fg(theme.border.color.as_color())
+                                },
+                            )
                             .style(Style::default().bg(theme.highlight.bg.as_color()))
                             .title("Bearer Token"),
                     )
@@ -1119,7 +1536,9 @@ impl RequestPane {
                 frame.render_widget(token_para, chunks[1]);
 
                 if is_focused && self.auth_field_focus == AuthField::Token {
-                    let x_offset = self.auth_token.as_str()[..self.auth_token.cursor_pos].chars().count() as u16;
+                    let x_offset = self.auth_token.as_str()[..self.auth_token.cursor_pos]
+                        .chars()
+                        .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
                         chunks[1].x + 1 + x_offset,
                         chunks[1].y + 1,
@@ -1129,10 +1548,7 @@ impl RequestPane {
             AuthType::ApiKey => {
                 let inner_chunks = Layout::default()
                     .direction(Direction::Vertical)
-                    .constraints(vec![
-                        Constraint::Length(3),
-                        Constraint::Length(3),
-                    ])
+                    .constraints(vec![Constraint::Length(3), Constraint::Length(3)])
                     .split(chunks[1]);
 
                 let key_style = if is_focused && self.auth_field_focus == AuthField::KeyName {
@@ -1155,11 +1571,13 @@ impl RequestPane {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(if is_focused && self.auth_field_focus == AuthField::KeyName {
-                                Style::default().fg(theme.border.active_color.as_color())
-                            } else {
-                                Style::default().fg(theme.border.color.as_color())
-                            })
+                            .border_style(
+                                if is_focused && self.auth_field_focus == AuthField::KeyName {
+                                    Style::default().fg(theme.border.active_color.as_color())
+                                } else {
+                                    Style::default().fg(theme.border.color.as_color())
+                                },
+                            )
                             .style(Style::default().bg(theme.highlight.bg.as_color()))
                             .title("Key Name"),
                     )
@@ -1171,11 +1589,13 @@ impl RequestPane {
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .border_style(if is_focused && self.auth_field_focus == AuthField::KeyValue {
-                                Style::default().fg(theme.border.active_color.as_color())
-                            } else {
-                                Style::default().fg(theme.border.color.as_color())
-                            })
+                            .border_style(
+                                if is_focused && self.auth_field_focus == AuthField::KeyValue {
+                                    Style::default().fg(theme.border.active_color.as_color())
+                                } else {
+                                    Style::default().fg(theme.border.color.as_color())
+                                },
+                            )
                             .style(Style::default().bg(theme.highlight.bg.as_color()))
                             .title("Key Value"),
                     )
@@ -1184,13 +1604,17 @@ impl RequestPane {
                 frame.render_widget(value_para, inner_chunks[1]);
 
                 if is_focused && self.auth_field_focus == AuthField::KeyName {
-                    let x_offset = self.auth_key_name.as_str()[..self.auth_key_name.cursor_pos].chars().count() as u16;
+                    let x_offset = self.auth_key_name.as_str()[..self.auth_key_name.cursor_pos]
+                        .chars()
+                        .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
                         inner_chunks[0].x + 1 + x_offset,
                         inner_chunks[0].y + 1,
                     ));
                 } else if is_focused && self.auth_field_focus == AuthField::KeyValue {
-                    let x_offset = self.auth_key_value.as_str()[..self.auth_key_value.cursor_pos].chars().count() as u16;
+                    let x_offset = self.auth_key_value.as_str()[..self.auth_key_value.cursor_pos]
+                        .chars()
+                        .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
                         inner_chunks[1].x + 1 + x_offset,
                         inner_chunks[1].y + 1,
@@ -1201,17 +1625,20 @@ impl RequestPane {
     }
 
     fn render_params_tab(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        let header = Row::new(vec![
-            Cell::from("Key"),
-            Cell::from("Value"),
-        ])
-        .style(Style::default().fg(theme.pane.title.as_color()).add_modifier(Modifier::BOLD));
+        let header = Row::new(vec![Cell::from("Key"), Cell::from("Value")]).style(
+            Style::default()
+                .fg(theme.pane.title.as_color())
+                .add_modifier(Modifier::BOLD),
+        );
 
-        let rows: Vec<Row> = self.params
+        let rows: Vec<Row> = self
+            .params
             .iter()
             .enumerate()
             .map(|(i, (key, value))| {
-                let is_selected = is_active && self.focused_field == FocusedField::TabContent && self.param_selected == i;
+                let is_selected = is_active
+                    && self.focused_field == FocusedField::TabContent
+                    && self.param_selected == i;
                 let style = if is_selected {
                     Style::default()
                         .bg(theme.highlight.selected_bg.as_color())
@@ -1246,20 +1673,23 @@ impl RequestPane {
             })
             .collect();
 
-        let table = Table::new(rows, &[Constraint::Percentage(40), Constraint::Percentage(60)])
-            .header(header)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color()))
-                    .title("Query Parameters (a=add, d=delete, ←→ to switch field)"),
-            )
-            .row_highlight_style(
-                Style::default()
-                    .bg(theme.highlight.selected_bg.as_color())
-                    .fg(theme.highlight.selected_fg.as_color()),
-            );
+        let table = Table::new(
+            rows,
+            &[Constraint::Percentage(40), Constraint::Percentage(60)],
+        )
+        .header(header)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .style(Style::default().bg(theme.pane.background.as_color()))
+                .title("Query Parameters (a=add, d=delete, ←→ to switch field)"),
+        )
+        .row_highlight_style(
+            Style::default()
+                .bg(theme.highlight.selected_bg.as_color())
+                .fg(theme.highlight.selected_fg.as_color()),
+        );
 
         let mut state = ratatui::widgets::TableState::default();
         if is_active && self.focused_field == FocusedField::TabContent {
@@ -1274,10 +1704,7 @@ impl RequestPane {
         frame.render_widget(Clear, popup_area);
 
         let methods = Method::all();
-        let items: Vec<ListItem> = methods
-            .iter()
-            .map(|m| ListItem::new(m.as_str()))
-            .collect();
+        let items: Vec<ListItem> = methods.iter().map(|m| ListItem::new(m.as_str())).collect();
 
         let list = List::new(items)
             .block(
@@ -1334,13 +1761,12 @@ impl RequestPane {
             })
             .collect();
 
-        let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.active_color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color())),
-            );
+        let list = List::new(items).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.active_color.as_color()))
+                .style(Style::default().bg(theme.pane.background.as_color())),
+        );
 
         frame.render_widget(list, popup_area);
     }
@@ -1369,6 +1795,22 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
 impl Default for RequestPane {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn normalize_single_line(content: &str) -> &str {
+    content.trim_end_matches(['\r', '\n'])
+}
+
+fn parse_auth_type(content: &str) -> Result<AuthType, EditorError> {
+    match content.trim().to_ascii_lowercase().as_str() {
+        "none" => Ok(AuthType::None),
+        "basic" => Ok(AuthType::Basic),
+        "bearer" => Ok(AuthType::Bearer),
+        "api key" | "apikey" | "api_key" => Ok(AuthType::ApiKey),
+        other => Err(EditorError::Validation(format!(
+            "Unknown auth type '{other}'"
+        ))),
     }
 }
 
@@ -1461,7 +1903,10 @@ mod tests {
 
     #[test]
     fn test_request_pane_url_history() {
-        let history = vec!["https://example.com".to_string(), "https://google.com".to_string()];
+        let history = vec![
+            "https://example.com".to_string(),
+            "https://google.com".to_string(),
+        ];
         let pane = RequestPane::new().with_url_history(history);
         assert_eq!(pane.url_history.len(), 2);
     }
@@ -1470,6 +1915,96 @@ mod tests {
     fn test_request_pane_default_headers() {
         let pane = RequestPane::new();
         assert_eq!(pane.headers.len(), 1);
+    }
+
+    #[test]
+    fn test_editor_spec_uses_expected_formats() {
+        let pane = RequestPane::new()
+            .with_url("https://example.com")
+            .with_headers({
+                let mut headers = Headers::new();
+                let _ = headers.set("Content-Type", "application/json");
+                headers
+            })
+            .with_body(RequestBody::Json(serde_json::json!({"ok": true})));
+
+        assert_eq!(
+            pane.editor_spec_for(EditableField::Url).unwrap().format,
+            EditorFormat::Text
+        );
+        assert_eq!(
+            pane.editor_spec_for(EditableField::Headers).unwrap().format,
+            EditorFormat::Yaml
+        );
+        assert_eq!(
+            pane.editor_spec_for(EditableField::Body).unwrap().format,
+            EditorFormat::Json
+        );
+    }
+
+    #[test]
+    fn test_apply_edited_url_trims_trailing_newline() {
+        let mut pane = RequestPane::new();
+        pane.apply_edited_content(EditableField::Url, "https://example.com/path\n")
+            .unwrap();
+        assert_eq!(pane.url(), "https://example.com/path");
+    }
+
+    #[test]
+    fn test_apply_edited_json_body_validates() {
+        let mut pane = RequestPane::new().with_body(RequestBody::Json(serde_json::json!({})));
+        let result = pane.apply_edited_content(EditableField::Body, "{invalid");
+        assert!(matches!(result, Err(EditorError::Validation(_))));
+    }
+
+    #[test]
+    fn test_apply_edited_headers_replaces_collection() {
+        let mut pane = RequestPane::new();
+        pane.apply_edited_content(
+            EditableField::Headers,
+            "- name: Accept\n  value: application/json\n- name: X-Test\n  value: true\n",
+        )
+        .unwrap();
+
+        let headers = pane.headers();
+        assert_eq!(headers.get("Accept"), Some("application/json"));
+        assert_eq!(headers.get("X-Test"), Some("true"));
+        assert_eq!(headers.len(), 2);
+    }
+
+    #[test]
+    fn test_apply_edited_header_name_validates_name() {
+        let mut pane = RequestPane::new();
+        let result = pane.apply_edited_content(EditableField::HeaderName(0), "Bad Header");
+        assert!(matches!(result, Err(EditorError::Validation(_))));
+    }
+
+    #[test]
+    fn test_cursor_context_is_preserved_after_external_edit_apply() {
+        let mut pane = RequestPane::new();
+        pane.selected_tab = 0;
+        pane.focused_field = FocusedField::TabContent;
+        pane.header_selected = 0;
+        pane.header_field_focus = HeaderField::Value;
+
+        let original_focus = pane.focused_field();
+        let original_selection = pane.header_selected;
+        pane.apply_edited_content(EditableField::HeaderValue(0), "application/json\n")
+            .unwrap();
+
+        assert_eq!(pane.focused_field(), original_focus);
+        assert_eq!(pane.header_selected, original_selection);
+    }
+
+    #[test]
+    fn test_focused_editable_field_tracks_header_value_context() {
+        let mut pane = RequestPane::new();
+        pane.selected_tab = 0;
+        pane.focused_field = FocusedField::TabContent;
+        pane.header_selected = 0;
+        pane.header_field_focus = HeaderField::Value;
+
+        assert_eq!(pane.focused_editable_field(), EditableField::HeaderValue(0));
     }
 
     #[test]

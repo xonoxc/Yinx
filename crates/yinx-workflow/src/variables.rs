@@ -229,9 +229,12 @@ fn parse_jsonpath(path: &str) -> Result<Vec<JsonPathPart>, VariableError> {
     Ok(parts)
 }
 
-pub fn extract_regex(text: &str, pattern: &str, capture_name: &str) -> Result<String, VariableError> {
-    let re =
-        Regex::new(pattern).map_err(|e| VariableError::InvalidRegex(e.to_string()))?;
+pub fn extract_regex(
+    text: &str,
+    pattern: &str,
+    capture_name: &str,
+) -> Result<String, VariableError> {
+    let re = Regex::new(pattern).map_err(|e| VariableError::InvalidRegex(e.to_string()))?;
     if let Some(caps) = re.captures(text) {
         if let Some(m) = caps.name(capture_name) {
             Ok(m.as_str().to_string())
@@ -245,7 +248,10 @@ pub fn extract_regex(text: &str, pattern: &str, capture_name: &str) -> Result<St
     }
 }
 
-pub fn extract_headers(response_headers: &HashMap<String, String>, header_name: &str) -> Option<String> {
+pub fn extract_headers(
+    response_headers: &HashMap<String, String>,
+    header_name: &str,
+) -> Option<String> {
     response_headers.get(header_name).cloned()
 }
 
@@ -265,7 +271,11 @@ mod tests {
     #[test]
     fn test_variable_store_set_and_get() {
         let mut store = VariableStore::new();
-        store.set("base_url", json!("https://api.example.com"), VariableScope::Global);
+        store.set(
+            "base_url",
+            json!("https://api.example.com"),
+            VariableScope::Global,
+        );
         let val = store.get("base_url").unwrap();
         assert_eq!(val, json!("https://api.example.com"));
     }
@@ -276,9 +286,20 @@ mod tests {
         store.set("var", json!("global"), VariableScope::Global);
         store.set("var", json!("workflow"), VariableScope::Workflow);
         store.set("var", json!("local"), VariableScope::Local);
-        assert_eq!(store.get_from_scope("var", &VariableScope::Global).unwrap(), json!("global"));
-        assert_eq!(store.get_from_scope("var", &VariableScope::Workflow).unwrap(), json!("workflow"));
-        assert_eq!(store.get_from_scope("var", &VariableScope::Local).unwrap(), json!("local"));
+        assert_eq!(
+            store.get_from_scope("var", &VariableScope::Global).unwrap(),
+            json!("global")
+        );
+        assert_eq!(
+            store
+                .get_from_scope("var", &VariableScope::Workflow)
+                .unwrap(),
+            json!("workflow")
+        );
+        assert_eq!(
+            store.get_from_scope("var", &VariableScope::Local).unwrap(),
+            json!("local")
+        );
         assert_eq!(store.get("var").unwrap(), json!("local"));
     }
 
@@ -337,7 +358,11 @@ mod tests {
     #[test]
     fn test_interpolate_dollar_syntax() {
         let mut store = VariableStore::new();
-        store.set("base_url", json!("https://api.example.com"), VariableScope::Global);
+        store.set(
+            "base_url",
+            json!("https://api.example.com"),
+            VariableScope::Global,
+        );
         store.set("endpoint", json!("/users"), VariableScope::Global);
         let result = interpolate("${base_url}${endpoint}", &store);
         assert_eq!(result, "https://api.example.com/users");
@@ -464,28 +489,40 @@ mod tests {
     fn test_jsonpath_field_not_found() {
         let json = json!({"name": "John"});
         let result = extract_jsonpath(&json, "$.age");
-        assert!(matches!(result, Err(VariableError::JsonPathExtractionFailed(_))));
+        assert!(matches!(
+            result,
+            Err(VariableError::JsonPathExtractionFailed(_))
+        ));
     }
 
     #[test]
     fn test_jsonpath_index_out_of_bounds() {
         let json = json!({"items": [1, 2]});
         let result = extract_jsonpath(&json, "$.items[5]");
-        assert!(matches!(result, Err(VariableError::JsonPathExtractionFailed(_))));
+        assert!(matches!(
+            result,
+            Err(VariableError::JsonPathExtractionFailed(_))
+        ));
     }
 
     #[test]
     fn test_jsonpath_not_object_for_field() {
         let json = json!([1, 2, 3]);
         let result = extract_jsonpath(&json, "$.name");
-        assert!(matches!(result, Err(VariableError::JsonPathExtractionFailed(_))));
+        assert!(matches!(
+            result,
+            Err(VariableError::JsonPathExtractionFailed(_))
+        ));
     }
 
     #[test]
     fn test_jsonpath_not_array_for_index() {
         let json = json!({"items": "not array"});
         let result = extract_jsonpath(&json, "$.items[0]");
-        assert!(matches!(result, Err(VariableError::JsonPathExtractionFailed(_))));
+        assert!(matches!(
+            result,
+            Err(VariableError::JsonPathExtractionFailed(_))
+        ));
     }
 
     #[test]

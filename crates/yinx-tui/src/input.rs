@@ -4,8 +4,8 @@ use std::fmt;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use serde::{Deserialize, Serialize};
 
-use yinx_core::state::InputMode;
 use yinx_core::events::AppEvent;
+use yinx_core::state::InputMode;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 struct KeyBindingKey {
@@ -368,10 +368,14 @@ impl InputHandler {
                 events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Request));
             }
             KeyAction::SwitchPaneResponse => {
-                events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Response));
+                events.push(AppEvent::PaneChanged(
+                    yinx_core::state::ActivePane::Response,
+                ));
             }
             KeyAction::SwitchPaneWorkflow => {
-                events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Workflow));
+                events.push(AppEvent::PaneChanged(
+                    yinx_core::state::ActivePane::Workflow,
+                ));
             }
             KeyAction::SwitchPaneLogs => {
                 events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs));
@@ -674,7 +678,10 @@ mod tests {
         let event = KeyEvent::new(KeyCode::Char('i'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
         assert_eq!(handler.current_mode(), InputMode::Insert);
-        assert!(matches!(events[0], AppEvent::ModeChanged(InputMode::Insert)));
+        assert!(matches!(
+            events[0],
+            AppEvent::ModeChanged(InputMode::Insert)
+        ));
     }
 
     #[test]
@@ -683,11 +690,17 @@ mod tests {
 
         let event = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
-        assert!(matches!(events[0], AppEvent::CursorMoved { lines: 1, cols: 0 }));
+        assert!(matches!(
+            events[0],
+            AppEvent::CursorMoved { lines: 1, cols: 0 }
+        ));
 
         let event = KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
-        assert!(matches!(events[0], AppEvent::CursorMoved { lines: -1, cols: 0 }));
+        assert!(matches!(
+            events[0],
+            AppEvent::CursorMoved { lines: -1, cols: 0 }
+        ));
     }
 
     #[test]
@@ -698,7 +711,10 @@ mod tests {
         let event = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
         let events = handler.handle_key(event);
         assert_eq!(handler.current_mode(), InputMode::Normal);
-        assert!(matches!(events[0], AppEvent::ModeChanged(InputMode::Normal)));
+        assert!(matches!(
+            events[0],
+            AppEvent::ModeChanged(InputMode::Normal)
+        ));
     }
 
     #[test]
@@ -723,13 +739,25 @@ mod tests {
 
         let event = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
-        assert!(matches!(events[0], AppEvent::CursorMoved { lines: i64::MIN, .. }));
+        assert!(matches!(
+            events[0],
+            AppEvent::CursorMoved {
+                lines: i64::MIN,
+                ..
+            }
+        ));
         assert_eq!(handler.pending_key, None);
 
         // Test 'G' to go to bottom
         let event = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
-        assert!(matches!(events[0], AppEvent::CursorMoved { lines: i64::MAX, .. }));
+        assert!(matches!(
+            events[0],
+            AppEvent::CursorMoved {
+                lines: i64::MAX,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -751,11 +779,17 @@ mod tests {
 
         let event = KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
-        assert!(matches!(events[0], AppEvent::PaneChanged(yinx_core::state::ActivePane::Request)));
+        assert!(matches!(
+            events[0],
+            AppEvent::PaneChanged(yinx_core::state::ActivePane::Request)
+        ));
 
         let event = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
-        assert!(matches!(events[0], AppEvent::PaneChanged(yinx_core::state::ActivePane::Response)));
+        assert!(matches!(
+            events[0],
+            AppEvent::PaneChanged(yinx_core::state::ActivePane::Response)
+        ));
     }
 
     #[test]
@@ -799,7 +833,7 @@ mod tests {
         let deleted = buffer.delete_char();
         assert_eq!(deleted, Some('c'));
         assert_eq!(buffer.as_str(), "ab");
-        assert_eq!(buffer.cursor_pos, 2);  // After decrement: 3-1=2
+        assert_eq!(buffer.cursor_pos, 2); // After decrement: 3-1=2
 
         // Move to position 1, delete char before cursor (at pos 0 = 'a')
         let mut buffer = InputBuffer::with_content("abc");

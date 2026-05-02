@@ -3,12 +3,15 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Cell, List, ListItem, ListState, Paragraph, Row, Table, Tabs, Wrap},
+    widgets::{
+        Block, BorderType, Borders, Cell, List, ListItem, ListState, Paragraph, Row, Table, Tabs,
+        Wrap,
+    },
     Frame,
 };
 
-use yinx_workflow::graph::Workflow;
 use yinx_workflow::engine::WorkflowState;
+use yinx_workflow::graph::Workflow;
 
 use crate::theme::Theme;
 
@@ -21,7 +24,11 @@ pub enum WorkflowTab {
 
 impl WorkflowTab {
     pub fn all() -> Vec<WorkflowTab> {
-        vec![WorkflowTab::Graph, WorkflowTab::Nodes, WorkflowTab::Variables]
+        vec![
+            WorkflowTab::Graph,
+            WorkflowTab::Nodes,
+            WorkflowTab::Variables,
+        ]
     }
 
     pub fn as_str(&self) -> &'static str {
@@ -210,13 +217,11 @@ impl WorkflowPane {
 
         let main_layout = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints(
-                if self.sidebar_visible {
-                    vec![Constraint::Percentage(20), Constraint::Percentage(80)]
-                } else {
-                    vec![Constraint::Percentage(100)]
-                }
-            )
+            .constraints(if self.sidebar_visible {
+                vec![Constraint::Percentage(20), Constraint::Percentage(80)]
+            } else {
+                vec![Constraint::Percentage(100)]
+            })
             .split(inner);
 
         if self.sidebar_visible {
@@ -241,12 +246,15 @@ impl WorkflowPane {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let items: Vec<ListItem> = self.workflows
+        let items: Vec<ListItem> = self
+            .workflows
             .iter()
             .enumerate()
             .map(|(idx, w)| {
                 let style = if idx == self.selected_workflow {
-                    Style::default().fg(theme.semantic.info.as_color()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme.semantic.info.as_color())
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -255,7 +263,11 @@ impl WorkflowPane {
             .collect();
 
         let list = List::new(items)
-            .highlight_style(Style::default().bg(theme.highlight.selected_bg.as_color()).fg(theme.highlight.selected_fg.as_color()))
+            .highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color()),
+            )
             .highlight_symbol("> ");
 
         let mut state = self.sidebar_list_state.clone();
@@ -282,17 +294,17 @@ impl WorkflowPane {
             .highlight_style(
                 Style::default()
                     .fg(theme.semantic.info.as_color())
-                    .add_modifier(Modifier::UNDERLINED | Modifier::BOLD)
+                    .add_modifier(Modifier::UNDERLINED | Modifier::BOLD),
             )
             .divider(" | ");
 
-        let block = Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(if matches!(self.focused_field, FocusedField::Tabs) {
+        let block = Block::default().borders(Borders::BOTTOM).border_style(
+            if matches!(self.focused_field, FocusedField::Tabs) {
                 Style::default().fg(theme.border.active_color.as_color())
             } else {
                 Style::default().fg(theme.border.color.as_color())
-            });
+            },
+        );
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -331,7 +343,13 @@ impl WorkflowPane {
         self.render_node_detail(frame, layout[1], theme, workflow);
     }
 
-    fn render_graph_visualization(&self, frame: &mut Frame, area: Rect, theme: &Theme, workflow: &Workflow) {
+    fn render_graph_visualization(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        workflow: &Workflow,
+    ) {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -356,10 +374,16 @@ impl WorkflowPane {
         let mut lines = Vec::new();
 
         for (node_id, node) in &workflow.nodes {
-            let status = self.node_statuses.get(node_id).unwrap_or(&NodeStatus::Pending);
+            let status = self
+                .node_statuses
+                .get(node_id)
+                .unwrap_or(&NodeStatus::Pending);
             let status_symbol = status.symbol();
             let method = node.request.method.to_string();
-            let url_short = node.request.url.as_str()
+            let url_short = node
+                .request
+                .url
+                .as_str()
                 .split('/')
                 .last()
                 .unwrap_or("")
@@ -374,8 +398,16 @@ impl WorkflowPane {
         lines.push(Line::from(""));
 
         for edge in &workflow.edges {
-            let line = format!("  {} --({})--> {}", edge.from, edge.condition.as_deref().unwrap_or(""), edge.to);
-            lines.push(Line::from(vec![Span::styled(line, Style::default().fg(theme.foreground.as_color()))]));
+            let line = format!(
+                "  {} --({})--> {}",
+                edge.from,
+                edge.condition.as_deref().unwrap_or(""),
+                edge.to
+            );
+            lines.push(Line::from(vec![Span::styled(
+                line,
+                Style::default().fg(theme.foreground.as_color()),
+            )]));
         }
 
         let paragraph = Paragraph::new(lines)
@@ -412,9 +444,15 @@ impl WorkflowPane {
         };
 
         let controls = vec![
-            Span::styled("Run All (r)", Style::default().fg(theme.semantic.info.as_color())),
+            Span::styled(
+                "Run All (r)",
+                Style::default().fg(theme.semantic.info.as_color()),
+            ),
             Span::raw(" | "),
-            Span::styled("Run Selected (Enter)", Style::default().fg(theme.semantic.info.as_color())),
+            Span::styled(
+                "Run Selected (Enter)",
+                Style::default().fg(theme.semantic.info.as_color()),
+            ),
             Span::raw(" | "),
             Span::styled("Stop", Style::default().fg(theme.semantic.error.as_color())),
             Span::raw(" | "),
@@ -441,10 +479,14 @@ impl WorkflowPane {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let items: Vec<ListItem> = workflow.nodes
+        let items: Vec<ListItem> = workflow
+            .nodes
             .values()
             .map(|node| {
-                let status = self.node_statuses.get(&node.id).unwrap_or(&NodeStatus::Pending);
+                let status = self
+                    .node_statuses
+                    .get(&node.id)
+                    .unwrap_or(&NodeStatus::Pending);
                 let symbol = status.symbol();
                 let style = Style::default().fg(status.color(theme));
                 let content = format!("{} {} [{}]", symbol, node.id, node.request.method);
@@ -453,14 +495,24 @@ impl WorkflowPane {
             .collect();
 
         let list = List::new(items)
-            .highlight_style(Style::default().bg(theme.highlight.selected_bg.as_color()).fg(theme.highlight.selected_fg.as_color()))
+            .highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color()),
+            )
             .highlight_symbol("> ");
 
         let mut state = self.node_list_state.clone();
         frame.render_stateful_widget(list, inner, &mut state);
     }
 
-    fn render_node_detail(&self, frame: &mut Frame, area: Rect, theme: &Theme, workflow: &Workflow) {
+    fn render_node_detail(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        workflow: &Workflow,
+    ) {
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -472,30 +524,50 @@ impl WorkflowPane {
 
         if let Some(node_id) = &self.selected_node {
             if let Some(node) = workflow.nodes.get(node_id) {
-                let status = self.node_statuses.get(node_id).unwrap_or(&NodeStatus::Pending);
+                let status = self
+                    .node_statuses
+                    .get(node_id)
+                    .unwrap_or(&NodeStatus::Pending);
 
                 let mut lines = vec![
                     Line::from(vec![
                         Span::styled("ID: ", Style::default().fg(theme.foreground.as_color())),
-                        Span::styled(&node.id, Style::default().fg(theme.foreground.as_color()).add_modifier(Modifier::BOLD)),
+                        Span::styled(
+                            &node.id,
+                            Style::default()
+                                .fg(theme.foreground.as_color())
+                                .add_modifier(Modifier::BOLD),
+                        ),
                     ]),
                     Line::from(vec![
                         Span::styled("Status: ", Style::default().fg(theme.foreground.as_color())),
                         Span::styled(status.symbol(), Style::default().fg(status.color(theme))),
-                        Span::styled(format!(" {:?}", status), Style::default().fg(status.color(theme))),
+                        Span::styled(
+                            format!(" {:?}", status),
+                            Style::default().fg(status.color(theme)),
+                        ),
                     ]),
                     Line::from(vec![
                         Span::styled("Method: ", Style::default().fg(theme.foreground.as_color())),
-                        Span::styled(node.request.method.to_string(), Style::default().fg(theme.semantic.info.as_color())),
+                        Span::styled(
+                            node.request.method.to_string(),
+                            Style::default().fg(theme.semantic.info.as_color()),
+                        ),
                     ]),
                     Line::from(vec![
                         Span::styled("URL: ", Style::default().fg(theme.foreground.as_color())),
-                        Span::styled(node.request.url.as_str(), Style::default().fg(theme.foreground.as_color())),
+                        Span::styled(
+                            node.request.url.as_str(),
+                            Style::default().fg(theme.foreground.as_color()),
+                        ),
                     ]),
                     Line::from(""),
-                    Line::from(vec![
-                        Span::styled("Headers:", Style::default().fg(theme.foreground.as_color()).add_modifier(Modifier::BOLD)),
-                    ]),
+                    Line::from(vec![Span::styled(
+                        "Headers:",
+                        Style::default()
+                            .fg(theme.foreground.as_color())
+                            .add_modifier(Modifier::BOLD),
+                    )]),
                 ];
 
                 for header in node.request.headers.iter() {
@@ -503,9 +575,12 @@ impl WorkflowPane {
                 }
 
                 lines.push(Line::from(""));
-                lines.push(Line::from(vec![
-                    Span::styled("Metadata:", Style::default().fg(theme.foreground.as_color()).add_modifier(Modifier::BOLD)),
-                ]));
+                lines.push(Line::from(vec![Span::styled(
+                    "Metadata:",
+                    Style::default()
+                        .fg(theme.foreground.as_color())
+                        .add_modifier(Modifier::BOLD),
+                )]));
 
                 for (key, value) in &node.metadata {
                     lines.push(Line::from(format!("  {}: {}", key, value)));
@@ -543,16 +618,26 @@ impl WorkflowPane {
             return;
         }
 
-        let rows: Vec<Row> = self.variables
+        let rows: Vec<Row> = self
+            .variables
             .iter()
             .map(|(key, value)| {
                 Row::new(vec![Cell::from(key.as_str()), Cell::from(value.as_str())])
             })
             .collect();
 
-        let table = Table::new(rows, &[Constraint::Percentage(30), Constraint::Percentage(70)])
-            .header(Row::new(vec!["Key", "Value"]).style(Style::default().fg(theme.semantic.info.as_color()).add_modifier(Modifier::BOLD)))
-            .style(Style::default().fg(theme.foreground.as_color()));
+        let table = Table::new(
+            rows,
+            &[Constraint::Percentage(30), Constraint::Percentage(70)],
+        )
+        .header(
+            Row::new(vec!["Key", "Value"]).style(
+                Style::default()
+                    .fg(theme.semantic.info.as_color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        )
+        .style(Style::default().fg(theme.foreground.as_color()));
 
         let mut state = ratatui::widgets::TableState::default();
         frame.render_stateful_widget(table, inner, &mut state);
@@ -744,20 +829,30 @@ impl WorkflowPane {
     fn run_all(&mut self) {
         self.workflow_state = WorkflowState::Running;
         for node_id in self.workflows[self.selected_workflow].nodes.keys() {
-            self.node_statuses.insert(node_id.clone(), NodeStatus::Running);
+            self.node_statuses
+                .insert(node_id.clone(), NodeStatus::Running);
         }
     }
 
     fn run_node(&mut self, node_id: &str) {
         self.workflow_state = WorkflowState::Running;
-        self.node_statuses.insert(node_id.to_string(), NodeStatus::Running);
+        self.node_statuses
+            .insert(node_id.to_string(), NodeStatus::Running);
     }
 
     pub fn set_node_status(&mut self, node_id: &str, status: NodeStatus) {
         self.node_statuses.insert(node_id.to_string(), status);
-        if self.node_statuses.values().all(|s| matches!(s, NodeStatus::Success)) {
+        if self
+            .node_statuses
+            .values()
+            .all(|s| matches!(s, NodeStatus::Success))
+        {
             self.workflow_state = WorkflowState::Done;
-        } else if self.node_statuses.values().any(|s| matches!(s, NodeStatus::Error)) {
+        } else if self
+            .node_statuses
+            .values()
+            .any(|s| matches!(s, NodeStatus::Error))
+        {
             self.workflow_state = WorkflowState::Failed;
         }
     }
@@ -770,16 +865,16 @@ impl WorkflowPane {
         self.focused_field
     }
 
-     pub fn set_focused_field(&mut self, field: FocusedField) {
-         self.focused_field = field;
-     }
+    pub fn set_focused_field(&mut self, field: FocusedField) {
+        self.focused_field = field;
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use yinx_workflow::graph::{Workflow, WorkflowNode, WorkflowEdge};
     use yinx_core::request::{Method, Request, RequestBody, RequestBuilder};
+    use yinx_workflow::graph::{Workflow, WorkflowEdge, WorkflowNode};
 
     fn create_test_request(method: Method, url: &str) -> Request {
         RequestBuilder::new()
@@ -800,7 +895,9 @@ mod tests {
         let node2 = WorkflowNode::new(request2).with_id("create-user");
         workflow.add_node(node2).unwrap();
 
-        workflow.add_edge(WorkflowEdge::new("get-users", "create-user")).unwrap();
+        workflow
+            .add_edge(WorkflowEdge::new("get-users", "create-user"))
+            .unwrap();
         workflow
     }
 
@@ -843,10 +940,22 @@ mod tests {
 
     #[test]
     fn test_node_status_to_workflow_state() {
-        assert!(matches!(NodeStatus::Pending.to_workflow_state(), WorkflowState::Pending));
-        assert!(matches!(NodeStatus::Running.to_workflow_state(), WorkflowState::Running));
-        assert!(matches!(NodeStatus::Success.to_workflow_state(), WorkflowState::Done));
-        assert!(matches!(NodeStatus::Error.to_workflow_state(), WorkflowState::Failed));
+        assert!(matches!(
+            NodeStatus::Pending.to_workflow_state(),
+            WorkflowState::Pending
+        ));
+        assert!(matches!(
+            NodeStatus::Running.to_workflow_state(),
+            WorkflowState::Running
+        ));
+        assert!(matches!(
+            NodeStatus::Success.to_workflow_state(),
+            WorkflowState::Done
+        ));
+        assert!(matches!(
+            NodeStatus::Error.to_workflow_state(),
+            WorkflowState::Failed
+        ));
     }
 
     #[test]
@@ -910,7 +1019,10 @@ mod tests {
         let mut pane = WorkflowPane::new().with_workflow(workflow);
 
         pane.set_node_status("get-users", NodeStatus::Success);
-        assert!(matches!(pane.node_statuses.get("get-users"), Some(NodeStatus::Success)));
+        assert!(matches!(
+            pane.node_statuses.get("get-users"),
+            Some(NodeStatus::Success)
+        ));
 
         pane.set_node_status("create-user", NodeStatus::Error);
         assert!(matches!(pane.workflow_state, WorkflowState::Failed));
@@ -944,7 +1056,6 @@ mod tests {
         assert!(pane.sidebar_visible);
     }
 }
-
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
     let popup_layout = Layout::default()

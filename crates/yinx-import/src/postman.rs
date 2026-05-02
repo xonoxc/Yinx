@@ -116,8 +116,7 @@ pub struct PostmanEnvironmentValue {
 }
 
 pub fn parse_collection(json: &str) -> Result<Vec<Request>, String> {
-    let collection: PostmanCollection =
-        serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let collection: PostmanCollection = serde_json::from_str(json).map_err(|e| e.to_string())?;
 
     let variables: HashMap<String, String> = collection
         .variable
@@ -239,7 +238,11 @@ fn resolve_url(url: PostmanUrl, variables: &HashMap<String, String>) -> String {
     match url {
         PostmanUrl::String(s) => replace_variables(&s, variables),
         PostmanUrl::Object {
-            raw, host, path, query, ..
+            raw,
+            host,
+            path,
+            query,
+            ..
         } => {
             if let Some(raw) = raw {
                 replace_variables(&raw, variables)
@@ -363,7 +366,10 @@ mod tests {
         let requests = parse_collection(json).unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, Method::Post);
-        assert_eq!(requests[0].headers.get("Content-Type"), Some("application/json"));
+        assert_eq!(
+            requests[0].headers.get("Content-Type"),
+            Some("application/json")
+        );
     }
 
     #[test]

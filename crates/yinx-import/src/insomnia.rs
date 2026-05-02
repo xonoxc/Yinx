@@ -66,24 +66,16 @@ pub struct InsomniaFormParam {
 #[serde(tag = "type")]
 pub enum InsomniaAuth {
     #[serde(rename = "basic")]
-    Basic {
-        username: String,
-        password: String,
-    },
+    Basic { username: String, password: String },
     #[serde(rename = "bearer")]
-    Bearer {
-        token: String,
-    },
+    Bearer { token: String },
     #[serde(rename = "oauth2")]
     OAuth2 {
         #[serde(rename = "accessToken")]
         access_token: String,
     },
     #[serde(rename = "ntlm")]
-    NTLM {
-        username: String,
-        password: String,
-    },
+    NTLM { username: String, password: String },
 }
 
 pub fn parse_insomnia_export(json: &str) -> Result<Vec<Request>, String> {
@@ -100,7 +92,9 @@ pub fn parse_insomnia_export(json: &str) -> Result<Vec<Request>, String> {
             ..
         } = resource
         {
-            let req_method: Method = method.parse().map_err(|e: String| format!("Invalid method: {}", e))?;
+            let req_method: Method = method
+                .parse()
+                .map_err(|e: String| format!("Invalid method: {}", e))?;
             let req_url = RequestUrl::new(&url).map_err(|e| e.to_string())?;
 
             let mut req_headers = yinx_core::request::Headers::new();
@@ -122,7 +116,8 @@ pub fn parse_insomnia_export(json: &str) -> Result<Vec<Request>, String> {
                         let _ = req_headers.set("Authorization", &format!("Bearer {}", token));
                     }
                     InsomniaAuth::OAuth2 { access_token } => {
-                        let _ = req_headers.set("Authorization", &format!("Bearer {}", access_token));
+                        let _ =
+                            req_headers.set("Authorization", &format!("Bearer {}", access_token));
                     }
                     InsomniaAuth::NTLM { username, password } => {
                         let encoded = base64::engine::general_purpose::STANDARD
@@ -147,11 +142,8 @@ pub fn parse_insomnia_export(json: &str) -> Result<Vec<Request>, String> {
                 }
                 "application/x-www-form-urlencoded" => {
                     if !body.params.is_empty() {
-                        let pairs: Vec<(String, String)> = body
-                            .params
-                            .into_iter()
-                            .map(|p| (p.name, p.value))
-                            .collect();
+                        let pairs: Vec<(String, String)> =
+                            body.params.into_iter().map(|p| (p.name, p.value)).collect();
                         RequestBody::Form(pairs)
                     } else if let Some(text) = body.text {
                         RequestBody::Raw(text)
@@ -191,7 +183,10 @@ pub fn parse_insomnia_environments(json: &str) -> Result<HashMap<String, String>
             InsomniaResource::Environment { data, .. } => {
                 env.extend(data);
             }
-            InsomniaResource::RequestGroup { environment: Some(e), .. } => {
+            InsomniaResource::RequestGroup {
+                environment: Some(e),
+                ..
+            } => {
                 env.extend(e);
             }
             _ => {}
@@ -288,7 +283,10 @@ mod tests {
         let requests = parse_insomnia_export(json).unwrap();
         assert_eq!(requests.len(), 1);
         assert_eq!(requests[0].method, Method::Post);
-        assert_eq!(requests[0].headers.get("Content-Type"), Some("application/json"));
+        assert_eq!(
+            requests[0].headers.get("Content-Type"),
+            Some("application/json")
+        );
     }
 
     #[test]
@@ -386,7 +384,14 @@ mod tests {
             ]
         }"#;
         let requests = parse_insomnia_export(json).unwrap();
-        assert_eq!(requests[0].headers.get("Authorization").unwrap().starts_with("Basic"), true);
+        assert_eq!(
+            requests[0]
+                .headers
+                .get("Authorization")
+                .unwrap()
+                .starts_with("Basic"),
+            true
+        );
     }
 
     #[test]
@@ -468,7 +473,14 @@ mod tests {
             ]
         }"#;
         let requests = parse_insomnia_export(json).unwrap();
-        assert_eq!(requests[0].headers.get("Authorization").unwrap().starts_with("NTLM"), true);
+        assert_eq!(
+            requests[0]
+                .headers
+                .get("Authorization")
+                .unwrap()
+                .starts_with("NTLM"),
+            true
+        );
     }
 
     #[test]

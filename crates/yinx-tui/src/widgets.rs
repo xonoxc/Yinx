@@ -2,7 +2,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, BorderType, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, Tabs, Wrap},
+    widgets::{
+        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
+        Tabs, Wrap,
+    },
     Frame,
 };
 
@@ -403,22 +406,20 @@ impl<'a> StatusBar<'a> {
                 .add_modifier(Modifier::BOLD),
         );
 
-        let cursor_span = Span::raw(format!("Ln {}, Col {}", self.cursor_line + 1, self.cursor_col + 1));
+        let cursor_span = Span::raw(format!(
+            "Ln {}, Col {}",
+            self.cursor_line + 1,
+            self.cursor_col + 1
+        ));
 
         let hint_spans: Vec<Span> = self
             .hints
             .iter()
             .flat_map(|(key, desc)| {
                 vec![
-                    Span::styled(
-                        *key,
-                        Style::default().fg(theme.semantic.warning.as_color()),
-                    ),
+                    Span::styled(*key, Style::default().fg(theme.semantic.warning.as_color())),
                     Span::raw(": "),
-                    Span::styled(
-                        *desc,
-                        Style::default().fg(theme.foreground.as_color()),
-                    ),
+                    Span::styled(*desc, Style::default().fg(theme.foreground.as_color())),
                     Span::raw("  "),
                 ]
             })
@@ -487,9 +488,7 @@ impl<'a> Modal<'a> {
             .title(self.title)
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
-            .border_style(
-                Style::default().fg(theme.border.active_color.as_color()),
-            )
+            .border_style(Style::default().fg(theme.border.active_color.as_color()))
             .style(
                 Style::default()
                     .bg(theme.pane.background.as_color())
@@ -501,9 +500,7 @@ impl<'a> Modal<'a> {
 
         let mut lines = self.content.clone();
         lines.push(Line::from(""));
-        lines.push(Line::from(vec![
-            Span::raw("Actions: "),
-        ]));
+        lines.push(Line::from(vec![Span::raw("Actions: ")]));
 
         for (i, (key, label)) in self.actions.iter().enumerate() {
             let style = if i == self.selected_action {
@@ -514,9 +511,10 @@ impl<'a> Modal<'a> {
             } else {
                 Style::default().fg(theme.foreground.as_color())
             };
-            lines.push(Line::from(vec![
-                Span::styled(format!("[{}] {}", key, label), style),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                format!("[{}] {}", key, label),
+                style,
+            )]));
         }
 
         let paragraph = Paragraph::new(lines)
@@ -614,8 +612,7 @@ mod tests {
     #[test]
     fn test_table_widget_with_sort() {
         let headers = vec!["Name"];
-        let table = TableWidget::new(headers)
-            .with_sort(Some(0), false);
+        let table = TableWidget::new(headers).with_sort(Some(0), false);
         assert_eq!(table.sort_col, Some(0));
         assert!(!table.sort_asc);
     }

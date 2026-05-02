@@ -53,8 +53,7 @@ pub enum RenameStrategy {
 pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, String> {
     match source {
         ImportSource::Curl(cmd) => {
-            let request = super::curl::parse_curl(&cmd)
-                .map_err(|e| format!("{:?}", e))?;
+            let request = super::curl::parse_curl(&cmd).map_err(|e| format!("{:?}", e))?;
             let mut preview = ImportPreview {
                 items: vec![ImportItem {
                     name: format!("{} {}", request.method, request.url.as_str()),
@@ -69,8 +68,7 @@ pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, Stri
             Ok(preview)
         }
         ImportSource::Postman(json) => {
-            let requests = super::postman::parse_collection(&json)
-                .map_err(|e| format!("{}", e))?;
+            let requests = super::postman::parse_collection(&json).map_err(|e| format!("{}", e))?;
             let items: Vec<ImportItem> = requests
                 .into_iter()
                 .enumerate()
@@ -92,8 +90,8 @@ pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, Stri
             Ok(preview)
         }
         ImportSource::Insomnia(json) => {
-            let requests = super::insomnia::parse_insomnia_export(&json)
-                .map_err(|e| format!("{}", e))?;
+            let requests =
+                super::insomnia::parse_insomnia_export(&json).map_err(|e| format!("{}", e))?;
             let items: Vec<ImportItem> = requests
                 .into_iter()
                 .enumerate()
@@ -115,8 +113,7 @@ pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, Stri
             Ok(preview)
         }
         ImportSource::OpenApi(spec) => {
-            let requests = super::openapi::parse_openapi(&spec)
-                .map_err(|e| format!("{}", e))?;
+            let requests = super::openapi::parse_openapi(&spec).map_err(|e| format!("{}", e))?;
             let items: Vec<ImportItem> = requests
                 .into_iter()
                 .enumerate()
@@ -277,8 +274,7 @@ paths:
     post:
       operationId: createUser
 "#;
-        let mut preview =
-            create_import_preview(ImportSource::OpenApi(yaml.to_string())).unwrap();
+        let mut preview = create_import_preview(ImportSource::OpenApi(yaml.to_string())).unwrap();
         assert_eq!(preview.items.len(), 2);
 
         deselect_all(&mut preview);

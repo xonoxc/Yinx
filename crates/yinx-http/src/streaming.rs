@@ -499,7 +499,9 @@ pub struct StreamHighlights {
 
 impl StreamHighlights {
     pub fn new() -> Self {
-        Self { markers: Vec::new() }
+        Self {
+            markers: Vec::new(),
+        }
     }
 
     pub fn mark_new_data(&mut self, position: u64) {

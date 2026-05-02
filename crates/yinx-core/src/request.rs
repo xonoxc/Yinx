@@ -245,7 +245,8 @@ impl RequestUrl {
         if url.contains('{') || url.contains('}') {
             // For template URLs, store the raw template and use a placeholder for inner
             let placeholder = "https://example.com";
-            let inner = StdUrl::parse(placeholder).map_err(|e| RequestError::InvalidUrl(e.to_string()))?;
+            let inner =
+                StdUrl::parse(placeholder).map_err(|e| RequestError::InvalidUrl(e.to_string()))?;
             Ok(Self {
                 inner,
                 raw_template: Some(url.to_string()),
@@ -253,7 +254,10 @@ impl RequestUrl {
         } else {
             let inner = StdUrl::parse(url).map_err(|e| RequestError::InvalidUrl(e.to_string()))?;
             match inner.scheme() {
-                "http" | "https" => Ok(Self { inner, raw_template: None }),
+                "http" | "https" => Ok(Self {
+                    inner,
+                    raw_template: None,
+                }),
                 _ => Err(RequestError::InvalidUrl(format!(
                     "Unsupported scheme: {}",
                     inner.scheme()

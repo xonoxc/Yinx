@@ -327,9 +327,10 @@ impl Workflow {
         // Verify that node.id matches the key in the HashMap
         for (key, node) in &self.nodes {
             if key != &node.id {
-                result.add_error(ValidationError::DuplicateNodeId(
-                    format!("Key '{}' doesn't match node.id '{}'", key, node.id)
-                ));
+                result.add_error(ValidationError::DuplicateNodeId(format!(
+                    "Key '{}' doesn't match node.id '{}'",
+                    key, node.id
+                )));
             }
         }
     }
@@ -366,7 +367,12 @@ impl Workflow {
     }
 
     /// Parse and validate variables referenced in conditions
-    fn validate_condition_variables(&self, condition: &str, edge: &WorkflowEdge, result: &mut ValidationResult) {
+    fn validate_condition_variables(
+        &self,
+        condition: &str,
+        edge: &WorkflowEdge,
+        result: &mut ValidationResult,
+    ) {
         // Check for has_var() references
         if condition.contains("has_var(") {
             let re = regex::Regex::new(r"has_var\((\w+)\)").unwrap();
@@ -401,10 +407,7 @@ impl Workflow {
     fn validate_requests(&self, result: &mut ValidationResult) {
         for (id, node) in &self.nodes {
             if let Err(e) = node.validate() {
-                result.add_error(ValidationError::InvalidRequest(
-                    id.clone(),
-                    e.to_string(),
-                ));
+                result.add_error(ValidationError::InvalidRequest(id.clone(), e.to_string()));
             }
         }
     }
@@ -835,24 +838,34 @@ mod tests {
     fn test_6_21_validate_dangling_source() {
         let mut workflow = Workflow::new("Test");
         let req = make_request("https://example.com");
-        workflow.add_node(WorkflowNode::new(req).with_id("node-2")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req).with_id("node-2"))
+            .unwrap();
         workflow.edges.push(WorkflowEdge::new("node-1", "node-2"));
 
         let result = workflow.validate();
         assert!(!result.is_valid());
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::DanglingEdgeSource(_))));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::DanglingEdgeSource(_))));
     }
 
     #[test]
     fn test_6_21_validate_dangling_target() {
         let mut workflow = Workflow::new("Test");
         let req = make_request("https://example.com");
-        workflow.add_node(WorkflowNode::new(req).with_id("node-1")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req).with_id("node-1"))
+            .unwrap();
         workflow.edges.push(WorkflowEdge::new("node-1", "node-3"));
 
         let result = workflow.validate();
         assert!(!result.is_valid());
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::DanglingEdgeTarget(_))));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::DanglingEdgeTarget(_))));
     }
 
     #[test]
@@ -860,9 +873,15 @@ mod tests {
         let mut workflow = Workflow::new("Test");
         let req1 = make_request("https://example.com/1");
         let req2 = make_request("https://example.com/2");
-        workflow.add_node(WorkflowNode::new(req1).with_id("node-1")).unwrap();
-        workflow.add_node(WorkflowNode::new(req2).with_id("node-2")).unwrap();
-        workflow.add_edge(WorkflowEdge::new("node-1", "node-2")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req1).with_id("node-1"))
+            .unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req2).with_id("node-2"))
+            .unwrap();
+        workflow
+            .add_edge(WorkflowEdge::new("node-1", "node-2"))
+            .unwrap();
 
         let result = workflow.validate();
         assert!(result.is_valid());
@@ -873,26 +892,31 @@ mod tests {
     fn test_6_22_undefined_var_in_condition_warning() {
         let mut workflow = Workflow::new("Test");
         let req = make_request("https://example.com");
-        workflow.add_node(WorkflowNode::new(req).with_id("node-1")).unwrap();
-        workflow.edges.push(
-            WorkflowEdge::new("node-1", "node-2")
-                .with_condition("has_var(undefined_var)")
-        );
+        workflow
+            .add_node(WorkflowNode::new(req).with_id("node-1"))
+            .unwrap();
+        workflow
+            .edges
+            .push(WorkflowEdge::new("node-1", "node-2").with_condition("has_var(undefined_var)"));
 
         let result = workflow.validate();
-        assert!(result.warnings.iter().any(|e| matches!(e, ValidationError::UndefinedVariable(_))));
+        assert!(result
+            .warnings
+            .iter()
+            .any(|e| matches!(e, ValidationError::UndefinedVariable(_))));
     }
 
     #[test]
     fn test_6_22_defined_var_no_warning() {
         let mut workflow = Workflow::new("Test");
         let req = make_request("https://example.com");
-        workflow.add_node(WorkflowNode::new(req).with_id("node-1")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req).with_id("node-1"))
+            .unwrap();
         workflow.set_variable("my_var", serde_json::json!("test"));
-        workflow.edges.push(
-            WorkflowEdge::new("node-1", "node-2")
-                .with_condition("has_var(my_var)")
-        );
+        workflow
+            .edges
+            .push(WorkflowEdge::new("node-1", "node-2").with_condition("has_var(my_var)"));
 
         let result = workflow.validate();
         assert!(result.warnings.is_empty());
@@ -904,10 +928,18 @@ mod tests {
         let mut workflow = Workflow::new("Test");
         let req1 = make_request("https://example.com/1");
         let req2 = make_request("https://example.com/2");
-        workflow.add_node(WorkflowNode::new(req1).with_id("node-1")).unwrap();
-        workflow.add_node(WorkflowNode::new(req2).with_id("node-2")).unwrap();
-        workflow.add_edge(WorkflowEdge::new("node-1", "node-2")).unwrap();
-        workflow.add_edge(WorkflowEdge::new("node-2", "node-1")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req1).with_id("node-1"))
+            .unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req2).with_id("node-2"))
+            .unwrap();
+        workflow
+            .add_edge(WorkflowEdge::new("node-1", "node-2"))
+            .unwrap();
+        workflow
+            .add_edge(WorkflowEdge::new("node-2", "node-1"))
+            .unwrap();
 
         let result = workflow.validate();
         assert!(!result.is_valid());
@@ -919,11 +951,21 @@ mod tests {
         let req1 = make_request("https://example.com/1");
         let req2 = make_request("https://example.com/2");
         let req3 = make_request("https://example.com/3");
-        workflow.add_node(WorkflowNode::new(req1).with_id("node-1")).unwrap();
-        workflow.add_node(WorkflowNode::new(req2).with_id("node-2")).unwrap();
-        workflow.add_node(WorkflowNode::new(req3).with_id("node-3")).unwrap();
-        workflow.add_edge(WorkflowEdge::new("node-1", "node-2")).unwrap();
-        workflow.add_edge(WorkflowEdge::new("node-2", "node-3")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req1).with_id("node-1"))
+            .unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req2).with_id("node-2"))
+            .unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req3).with_id("node-3"))
+            .unwrap();
+        workflow
+            .add_edge(WorkflowEdge::new("node-1", "node-2"))
+            .unwrap();
+        workflow
+            .add_edge(WorkflowEdge::new("node-2", "node-3"))
+            .unwrap();
 
         let result = workflow.validate();
         assert!(result.is_valid());
@@ -940,7 +982,10 @@ mod tests {
 
         let result = workflow.validate();
         assert!(!result.is_valid());
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::DuplicateNodeId(_))));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::DuplicateNodeId(_))));
     }
 
     #[test]
@@ -948,8 +993,12 @@ mod tests {
         let mut workflow = Workflow::new("Test");
         let req1 = make_request("https://example.com/1");
         let req2 = make_request("https://example.com/2");
-        workflow.add_node(WorkflowNode::new(req1).with_id("node-1")).unwrap();
-        workflow.add_node(WorkflowNode::new(req2).with_id("node-2")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req1).with_id("node-1"))
+            .unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req2).with_id("node-2"))
+            .unwrap();
 
         let result = workflow.validate();
         assert!(result.is_valid());
@@ -960,26 +1009,31 @@ mod tests {
     fn test_6_25_condition_with_dollar_syntax_undefined_var() {
         let mut workflow = Workflow::new("Test");
         let req = make_request("https://example.com");
-        workflow.add_node(WorkflowNode::new(req).with_id("node-1")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req).with_id("node-1"))
+            .unwrap();
         workflow.edges.push(
-            WorkflowEdge::new("node-1", "node-2")
-                .with_condition("${undefined_var} == 'test'")
+            WorkflowEdge::new("node-1", "node-2").with_condition("${undefined_var} == 'test'"),
         );
 
         let result = workflow.validate();
-        assert!(result.warnings.iter().any(|e| matches!(e, ValidationError::UndefinedVariable(_))));
+        assert!(result
+            .warnings
+            .iter()
+            .any(|e| matches!(e, ValidationError::UndefinedVariable(_))));
     }
 
     #[test]
     fn test_6_25_condition_with_brace_syntax_undefined_var() {
         let mut workflow = Workflow::new("Test");
         let req = make_request("https://example.com");
-        workflow.add_node(WorkflowNode::new(req).with_id("node-1")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req).with_id("node-1"))
+            .unwrap();
         workflow.set_variable("my_var", serde_json::json!("test"));
-        workflow.edges.push(
-            WorkflowEdge::new("node-1", "node-2")
-                .with_condition("{{my_var}} == 'test'")
-        );
+        workflow
+            .edges
+            .push(WorkflowEdge::new("node-1", "node-2").with_condition("{{my_var}} == 'test'"));
 
         let result = workflow.validate();
         assert!(result.warnings.is_empty());
@@ -992,14 +1046,19 @@ mod tests {
 
         let result = workflow.validate();
         assert!(!result.is_valid());
-        assert!(result.errors.iter().any(|e| matches!(e, ValidationError::EmptyWorkflow)));
+        assert!(result
+            .errors
+            .iter()
+            .any(|e| matches!(e, ValidationError::EmptyWorkflow)));
     }
 
     #[test]
     fn test_6_26_non_empty_workflow_valid() {
         let mut workflow = Workflow::new("Test");
         let req = make_request("https://example.com");
-        workflow.add_node(WorkflowNode::new(req).with_id("node-1")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req).with_id("node-1"))
+            .unwrap();
 
         let result = workflow.validate();
         assert!(result.is_valid());
@@ -1034,7 +1093,9 @@ mod tests {
     fn test_6_27_valid_request_in_node() {
         let mut workflow = Workflow::new("Test");
         let req = make_request("https://example.com");
-        workflow.add_node(WorkflowNode::new(req).with_id("node-1")).unwrap();
+        workflow
+            .add_node(WorkflowNode::new(req).with_id("node-1"))
+            .unwrap();
 
         let result = workflow.validate();
         assert!(result.is_valid());

@@ -105,9 +105,7 @@ pub fn parse_curl(command: &str) -> Result<Request, CurlParseError> {
                         .filter_map(|pair| {
                             let mut parts = pair.splitn(2, '=');
                             match (parts.next(), parts.next()) {
-                                (Some(k), Some(v)) => {
-                                    Some((k.to_string(), v.to_string()))
-                                }
+                                (Some(k), Some(v)) => Some((k.to_string(), v.to_string())),
                                 _ => None,
                             }
                         })
@@ -177,19 +175,31 @@ mod tests {
 
     #[test]
     fn test_tokenize_double_quoted_args() {
-        let result = tokenize(r#"curl -H "Content-Type: application/json" https://example.com"#).unwrap();
+        let result =
+            tokenize(r#"curl -H "Content-Type: application/json" https://example.com"#).unwrap();
         assert_eq!(
             result,
-            vec!["curl", "-H", "Content-Type: application/json", "https://example.com"]
+            vec![
+                "curl",
+                "-H",
+                "Content-Type: application/json",
+                "https://example.com"
+            ]
         );
     }
 
     #[test]
     fn test_tokenize_single_quoted_args() {
-        let result = tokenize(r#"curl -H 'Content-Type: application/json' https://example.com"#).unwrap();
+        let result =
+            tokenize(r#"curl -H 'Content-Type: application/json' https://example.com"#).unwrap();
         assert_eq!(
             result,
-            vec!["curl", "-H", "Content-Type: application/json", "https://example.com"]
+            vec![
+                "curl",
+                "-H",
+                "Content-Type: application/json",
+                "https://example.com"
+            ]
         );
     }
 
@@ -265,8 +275,12 @@ mod tests {
     // 5.3: Parse -H/--header -> Headers
     #[test]
     fn test_parse_single_header() {
-        let request = parse_curl("curl -H 'Content-Type: application/json' https://example.com").unwrap();
-        assert_eq!(request.headers.get("Content-Type"), Some("application/json"));
+        let request =
+            parse_curl("curl -H 'Content-Type: application/json' https://example.com").unwrap();
+        assert_eq!(
+            request.headers.get("Content-Type"),
+            Some("application/json")
+        );
     }
 
     #[test]
@@ -275,16 +289,18 @@ mod tests {
             "curl -H 'Content-Type: application/json' -H 'Accept: application/json' https://example.com",
         )
         .unwrap();
-        assert_eq!(request.headers.get("Content-Type"), Some("application/json"));
+        assert_eq!(
+            request.headers.get("Content-Type"),
+            Some("application/json")
+        );
         assert_eq!(request.headers.get("Accept"), Some("application/json"));
     }
 
     #[test]
     fn test_parse_header_with_special_chars() {
-        let request = parse_curl(
-            r#"curl -H "Authorization: Bearer token123!$%^&*()" https://example.com"#,
-        )
-        .unwrap();
+        let request =
+            parse_curl(r#"curl -H "Authorization: Bearer token123!$%^&*()" https://example.com"#)
+                .unwrap();
         assert_eq!(
             request.headers.get("Authorization"),
             Some("Bearer token123!$%^&*()")
@@ -293,10 +309,8 @@ mod tests {
 
     #[test]
     fn test_parse_header_long_form() {
-        let request = parse_curl(
-            "curl --header 'Content-Type: text/plain' https://example.com",
-        )
-        .unwrap();
+        let request =
+            parse_curl("curl --header 'Content-Type: text/plain' https://example.com").unwrap();
         assert_eq!(request.headers.get("Content-Type"), Some("text/plain"));
     }
 
@@ -315,15 +329,15 @@ mod tests {
             json
         ))
         .unwrap();
-        assert_eq!(request.body, RequestBody::Json(serde_json::json!({"key":"value"})));
+        assert_eq!(
+            request.body,
+            RequestBody::Json(serde_json::json!({"key":"value"}))
+        );
     }
 
     #[test]
     fn test_parse_form_data() {
-        let request = parse_curl(
-            "curl -d 'name=john&age=30' https://example.com",
-        )
-        .unwrap();
+        let request = parse_curl("curl -d 'name=john&age=30' https://example.com").unwrap();
         match &request.body {
             RequestBody::Form(pairs) => {
                 assert_eq!(pairs.len(), 2);
@@ -350,7 +364,10 @@ mod tests {
     #[test]
     fn test_parse_url_with_query_params() {
         let request = parse_curl("curl 'https://example.com/api?key=value&foo=bar'").unwrap();
-        assert_eq!(request.url.as_str(), "https://example.com/api?key=value&foo=bar");
+        assert_eq!(
+            request.url.as_str(),
+            "https://example.com/api?key=value&foo=bar"
+        );
     }
 
     #[test]
@@ -390,11 +407,12 @@ mod tests {
 
     #[test]
     fn test_parse_multiple_cookies() {
-        let request = parse_curl(
-            "curl --cookie 'session=abc123; user=john' https://example.com",
-        )
-        .unwrap();
-        assert_eq!(request.headers.get("Cookie"), Some("session=abc123; user=john"));
+        let request =
+            parse_curl("curl --cookie 'session=abc123; user=john' https://example.com").unwrap();
+        assert_eq!(
+            request.headers.get("Cookie"),
+            Some("session=abc123; user=john")
+        );
     }
 
     // 5.8: Full curl integration test
@@ -404,9 +422,15 @@ mod tests {
         let request = parse_curl(cmd).unwrap();
         assert_eq!(request.method, Method::Post);
         assert_eq!(request.url.as_str(), "https://api.example.com/v1/users");
-        assert_eq!(request.headers.get("Content-Type"), Some("application/json"));
+        assert_eq!(
+            request.headers.get("Content-Type"),
+            Some("application/json")
+        );
         assert_eq!(request.headers.get("Accept"), Some("application/json"));
-        assert_eq!(request.body, RequestBody::Json(serde_json::json!({"name":"test"})));
+        assert_eq!(
+            request.body,
+            RequestBody::Json(serde_json::json!({"name":"test"}))
+        );
     }
 
     #[test]
@@ -414,7 +438,11 @@ mod tests {
         let cmd = "curl -X GET --user 'admin:pass' --cookie 'session=xyz789' https://api.example.com/v1/me";
         let request = parse_curl(cmd).unwrap();
         assert_eq!(request.method, Method::Get);
-        assert!(request.headers.get("Authorization").unwrap().starts_with("Basic "));
+        assert!(request
+            .headers
+            .get("Authorization")
+            .unwrap()
+            .starts_with("Basic "));
         assert_eq!(request.headers.get("Cookie"), Some("session=xyz789"));
     }
 

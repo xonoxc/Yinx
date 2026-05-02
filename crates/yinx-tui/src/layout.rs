@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use ratatui::layout::{Constraint, Direction, Layout as RatatuiLayout, Rect};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct PaneConstraints {
@@ -240,11 +240,13 @@ impl Layout {
         let remaining_width = width.saturating_sub(req_width);
 
         let resp_width = (remaining_width as f32 * self.state.config.response_pane_ratio
-            / (self.state.config.response_pane_ratio + self.state.config.workflow_pane_ratio + self.state.config.logs_pane_ratio))
-            as u16;
+            / (self.state.config.response_pane_ratio
+                + self.state.config.workflow_pane_ratio
+                + self.state.config.logs_pane_ratio)) as u16;
         let wf_width = (remaining_width as f32 * self.state.config.workflow_pane_ratio
-            / (self.state.config.response_pane_ratio + self.state.config.workflow_pane_ratio + self.state.config.logs_pane_ratio))
-            as u16;
+            / (self.state.config.response_pane_ratio
+                + self.state.config.workflow_pane_ratio
+                + self.state.config.logs_pane_ratio)) as u16;
         let logs_width = remaining_width
             .saturating_sub(resp_width)
             .saturating_sub(wf_width)
@@ -286,16 +288,14 @@ impl Layout {
     }
 
     pub fn resize_request_pane(&mut self, delta: i16) {
-        let new_width = (self.state.config.request_pane_width as i16 + delta).max(
-            self.state.constraints.request.min_width as i16,
-        ) as u16;
+        let new_width = (self.state.config.request_pane_width as i16 + delta)
+            .max(self.state.constraints.request.min_width as i16) as u16;
         self.state.config.request_pane_width = new_width;
     }
 
     pub fn resize_response_pane(&mut self, delta: i16) {
-        let new_height = (self.state.config.response_pane_height as i16 + delta).max(
-            self.state.constraints.response.min_height as i16,
-        ) as u16;
+        let new_height = (self.state.config.response_pane_height as i16 + delta)
+            .max(self.state.constraints.response.min_height as i16) as u16;
         self.state.config.response_pane_height = new_height;
     }
 
@@ -335,8 +335,10 @@ impl Layout {
             errors.push("Horizontal layout: minimum widths exceed terminal width".to_string());
         }
 
-        if constraints.request.min_height + constraints.response.min_height
-            + constraints.workflow.min_height + constraints.logs.min_height
+        if constraints.request.min_height
+            + constraints.response.min_height
+            + constraints.workflow.min_height
+            + constraints.logs.min_height
             + constraints.status_bar.min_height
             > height
         {

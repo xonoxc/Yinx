@@ -35,13 +35,41 @@ impl ColorDef {
     }
 
     pub const BLACK: ColorDef = ColorDef { r: 0, g: 0, b: 0 };
-    pub const WHITE: ColorDef = ColorDef { r: 255, g: 255, b: 255 };
-    pub const RED: ColorDef = ColorDef { r: 220, g: 50, b: 47 };
-    pub const GREEN: ColorDef = ColorDef { r: 80, g: 200, b: 120 };
-    pub const YELLOW: ColorDef = ColorDef { r: 255, g: 184, b: 108 };
-    pub const BLUE: ColorDef = ColorDef { r: 97, g: 175, b: 239 };
-    pub const MAGENTA: ColorDef = ColorDef { r: 198, g: 120, b: 221 };
-    pub const CYAN: ColorDef = ColorDef { r: 86, g: 182, b: 194 };
+    pub const WHITE: ColorDef = ColorDef {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
+    pub const RED: ColorDef = ColorDef {
+        r: 220,
+        g: 50,
+        b: 47,
+    };
+    pub const GREEN: ColorDef = ColorDef {
+        r: 80,
+        g: 200,
+        b: 120,
+    };
+    pub const YELLOW: ColorDef = ColorDef {
+        r: 255,
+        g: 184,
+        b: 108,
+    };
+    pub const BLUE: ColorDef = ColorDef {
+        r: 97,
+        g: 175,
+        b: 239,
+    };
+    pub const MAGENTA: ColorDef = ColorDef {
+        r: 198,
+        g: 120,
+        b: 221,
+    };
+    pub const CYAN: ColorDef = ColorDef {
+        r: 86,
+        g: 182,
+        b: 194,
+    };
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,15 +116,31 @@ impl Theme {
         Self {
             name: "dark".to_string(),
             background: ColorDef::BLACK,
-            foreground: ColorDef { r: 220, g: 220, b: 220 },
+            foreground: ColorDef {
+                r: 220,
+                g: 220,
+                b: 220,
+            },
             border: BorderStyle {
-                color: ColorDef { r: 60, g: 60, b: 60 },
+                color: ColorDef {
+                    r: 60,
+                    g: 60,
+                    b: 60,
+                },
                 active_color: ColorDef::BLUE,
                 style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
-                bg: ColorDef { r: 40, g: 44, b: 52 },
-                fg: ColorDef { r: 220, g: 220, b: 220 },
+                bg: ColorDef {
+                    r: 40,
+                    g: 44,
+                    b: 52,
+                },
+                fg: ColorDef {
+                    r: 220,
+                    g: 220,
+                    b: 220,
+                },
                 selected_bg: ColorDef::BLUE,
                 selected_fg: ColorDef::WHITE,
             },
@@ -107,9 +151,17 @@ impl Theme {
                 info: ColorDef::BLUE,
             },
             pane: PaneColors {
-                background: ColorDef { r: 20, g: 20, b: 30 },
+                background: ColorDef {
+                    r: 20,
+                    g: 20,
+                    b: 30,
+                },
                 title: ColorDef::CYAN,
-                status_bar_bg: ColorDef { r: 40, g: 44, b: 52 },
+                status_bar_bg: ColorDef {
+                    r: 40,
+                    g: 44,
+                    b: 52,
+                },
                 status_bar_fg: ColorDef::WHITE,
             },
         }
@@ -118,30 +170,86 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             name: "light".to_string(),
-            background: ColorDef { r: 240, g: 240, b: 240 },
-            foreground: ColorDef { r: 30, g: 30, b: 30 },
+            background: ColorDef {
+                r: 240,
+                g: 240,
+                b: 240,
+            },
+            foreground: ColorDef {
+                r: 30,
+                g: 30,
+                b: 30,
+            },
             border: BorderStyle {
-                color: ColorDef { r: 180, g: 180, b: 180 },
-                active_color: ColorDef { r: 50, g: 100, b: 200 },
+                color: ColorDef {
+                    r: 180,
+                    g: 180,
+                    b: 180,
+                },
+                active_color: ColorDef {
+                    r: 50,
+                    g: 100,
+                    b: 200,
+                },
                 style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
-                bg: ColorDef { r: 220, g: 220, b: 220 },
-                fg: ColorDef { r: 30, g: 30, b: 30 },
-                selected_bg: ColorDef { r: 50, g: 100, b: 200 },
+                bg: ColorDef {
+                    r: 220,
+                    g: 220,
+                    b: 220,
+                },
+                fg: ColorDef {
+                    r: 30,
+                    g: 30,
+                    b: 30,
+                },
+                selected_bg: ColorDef {
+                    r: 50,
+                    g: 100,
+                    b: 200,
+                },
                 selected_fg: ColorDef::WHITE,
             },
             semantic: SemanticColors {
-                success: ColorDef { r: 0, g: 150, b: 50 },
+                success: ColorDef {
+                    r: 0,
+                    g: 150,
+                    b: 50,
+                },
                 error: ColorDef { r: 200, g: 0, b: 0 },
-                warning: ColorDef { r: 200, g: 150, b: 0 },
-                info: ColorDef { r: 0, g: 100, b: 200 },
+                warning: ColorDef {
+                    r: 200,
+                    g: 150,
+                    b: 0,
+                },
+                info: ColorDef {
+                    r: 0,
+                    g: 100,
+                    b: 200,
+                },
             },
             pane: PaneColors {
-                background: ColorDef { r: 250, g: 250, b: 250 },
-                title: ColorDef { r: 50, g: 100, b: 200 },
-                status_bar_bg: ColorDef { r: 220, g: 220, b: 220 },
-                status_bar_fg: ColorDef { r: 30, g: 30, b: 30 },
+                background: ColorDef {
+                    r: 250,
+                    g: 250,
+                    b: 250,
+                },
+                title: ColorDef {
+                    r: 50,
+                    g: 100,
+                    b: 200,
+                },
+                status_bar_bg: ColorDef {
+                    r: 220,
+                    g: 220,
+                    b: 220,
+                },
+                status_bar_fg: ColorDef {
+                    r: 30,
+                    g: 30,
+                    b: 30,
+                },
             },
         }
     }
@@ -318,30 +426,94 @@ mod tests {
     fn test_theme_with_custom_colors() {
         let theme = Theme {
             name: "custom".to_string(),
-            background: ColorDef { r: 10, g: 20, b: 30 },
-            foreground: ColorDef { r: 200, g: 210, b: 220 },
+            background: ColorDef {
+                r: 10,
+                g: 20,
+                b: 30,
+            },
+            foreground: ColorDef {
+                r: 200,
+                g: 210,
+                b: 220,
+            },
             border: BorderStyle {
-                color: ColorDef { r: 50, g: 50, b: 50 },
-                active_color: ColorDef { r: 100, g: 150, b: 200 },
+                color: ColorDef {
+                    r: 50,
+                    g: 50,
+                    b: 50,
+                },
+                active_color: ColorDef {
+                    r: 100,
+                    g: 150,
+                    b: 200,
+                },
                 style: BorderType::Double,
             },
             highlight: HighlightStyle {
-                bg: ColorDef { r: 30, g: 30, b: 30 },
-                fg: ColorDef { r: 200, g: 200, b: 200 },
-                selected_bg: ColorDef { r: 80, g: 100, b: 180 },
-                selected_fg: ColorDef { r: 255, g: 255, b: 255 },
+                bg: ColorDef {
+                    r: 30,
+                    g: 30,
+                    b: 30,
+                },
+                fg: ColorDef {
+                    r: 200,
+                    g: 200,
+                    b: 200,
+                },
+                selected_bg: ColorDef {
+                    r: 80,
+                    g: 100,
+                    b: 180,
+                },
+                selected_fg: ColorDef {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                },
             },
             semantic: SemanticColors {
-                success: ColorDef { r: 50, g: 180, b: 50 },
-                error: ColorDef { r: 200, g: 30, b: 30 },
-                warning: ColorDef { r: 220, g: 160, b: 30 },
-                info: ColorDef { r: 30, g: 80, b: 200 },
+                success: ColorDef {
+                    r: 50,
+                    g: 180,
+                    b: 50,
+                },
+                error: ColorDef {
+                    r: 200,
+                    g: 30,
+                    b: 30,
+                },
+                warning: ColorDef {
+                    r: 220,
+                    g: 160,
+                    b: 30,
+                },
+                info: ColorDef {
+                    r: 30,
+                    g: 80,
+                    b: 200,
+                },
             },
             pane: PaneColors {
-                background: ColorDef { r: 15, g: 15, b: 25 },
-                title: ColorDef { r: 100, g: 150, b: 200 },
-                status_bar_bg: ColorDef { r: 30, g: 30, b: 30 },
-                status_bar_fg: ColorDef { r: 200, g: 200, b: 200 },
+                background: ColorDef {
+                    r: 15,
+                    g: 15,
+                    b: 25,
+                },
+                title: ColorDef {
+                    r: 100,
+                    g: 150,
+                    b: 200,
+                },
+                status_bar_bg: ColorDef {
+                    r: 30,
+                    g: 30,
+                    b: 30,
+                },
+                status_bar_fg: ColorDef {
+                    r: 200,
+                    g: 200,
+                    b: 200,
+                },
             },
         };
 

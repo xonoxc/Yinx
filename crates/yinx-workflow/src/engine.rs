@@ -3,14 +3,14 @@ use crate::variables::{interpolate, VariableStore};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::Notify;
 use yinx_core::request::{Request, RequestUrl};
 use yinx_core::response::Response;
 use yinx_http::client::HttpClient;
-use tokio::sync::Notify;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum ExecutionError {
@@ -195,8 +195,10 @@ impl WorkflowExecutor {
 
             if attempt > 0 {
                 let delay_ms = (options.retry_config.base_delay_ms as f64
-                    * options.retry_config.backoff_multiplier.powi(attempt as i32 - 1))
-                    as u64;
+                    * options
+                        .retry_config
+                        .backoff_multiplier
+                        .powi(attempt as i32 - 1)) as u64;
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
             }
 
@@ -217,16 +219,18 @@ impl WorkflowExecutor {
 
             match send_result {
                 Ok(response) => {
-                    if response.status.is_error() && matches!(options.error_strategy, ErrorStrategy::Retry) {
+                    if response.status.is_error()
+                        && matches!(options.error_strategy, ErrorStrategy::Retry)
+                    {
                         last_error = Some(format!("HTTP error: {}", response.status));
                         continue;
                     }
-                    
+
                     let status_is_error = response.status.is_error();
                     let status_str = format!("{}", response.status);
                     let mut extracted = HashMap::new();
                     self.extract_variables_from_response(&response, &mut extracted);
-                    
+
                     if status_is_error {
                         return NodeExecutionResult {
                             node_id: node.id.clone(),
@@ -270,7 +274,11 @@ impl WorkflowExecutor {
         if let Some(body) = response.body.as_text() {
             if let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) {
                 extracted.insert("response_body".to_string(), json.clone());
-                store.set("response_body".to_string(), json, crate::variables::VariableScope::Local);
+                store.set(
+                    "response_body".to_string(),
+                    json,
+                    crate::variables::VariableScope::Local,
+                );
             } else {
                 extracted.insert(
                     "response_body".to_string(),
@@ -279,12 +287,21 @@ impl WorkflowExecutor {
             }
         } else if let yinx_core::response::ResponseBody::Json(ref json) = response.body {
             extracted.insert("response_body".to_string(), json.clone());
-            store.set("response_body".to_string(), json.clone(), crate::variables::VariableScope::Local);
+            store.set(
+                "response_body".to_string(),
+                json.clone(),
+                crate::variables::VariableScope::Local,
+            );
         }
 
-        let status_val = serde_json::Value::Number(serde_json::Number::from(response.status.code()));
+        let status_val =
+            serde_json::Value::Number(serde_json::Number::from(response.status.code()));
         extracted.insert("status_code".to_string(), status_val.clone());
-        store.set("status_code".to_string(), status_val, crate::variables::VariableScope::Local);
+        store.set(
+            "status_code".to_string(),
+            status_val,
+            crate::variables::VariableScope::Local,
+        );
 
         let mut headers_map = HashMap::new();
         for (name, value) in response.headers.to_pairs() {
@@ -416,9 +433,10 @@ impl WorkflowExecutor {
                 return Ok(result);
             }
 
-            let node = workflow.nodes.get(node_id).ok_or_else(|| {
-                ExecutionError::NodeNotFound(node_id.clone())
-            })?;
+            let node = workflow
+                .nodes
+                .get(node_id)
+                .ok_or_else(|| ExecutionError::NodeNotFound(node_id.clone()))?;
 
             let node_result = self.execute_node(node, options).await;
 
@@ -431,11 +449,7 @@ impl WorkflowExecutor {
                 }
                 if matches!(options.error_strategy, ErrorStrategy::Stop) {
                     result.state = WorkflowState::Failed;
-                    result.error = Some(format!(
-                        "Node '{}' failed: {}",
-                        node_id,
-                        error
-                    ));
+                    result.error = Some(format!("Node '{}' failed: {}", node_id, error));
                     result.node_results.insert(node_id.clone(), node_result);
                     return Ok(result);
                 }
@@ -489,9 +503,10 @@ impl WorkflowExecutor {
 
             let mut handles = Vec::new();
             for node_id in &ready_nodes {
-                let node = workflow.nodes.get(*node_id).ok_or_else(|| {
-                    ExecutionError::NodeNotFound((*node_id).clone())
-                })?;
+                let node = workflow
+                    .nodes
+                    .get(*node_id)
+                    .ok_or_else(|| ExecutionError::NodeNotFound((*node_id).clone()))?;
                 let executor = Self {
                     http_client: self.http_client.clone(),
                     variables: self.variables.clone(),
@@ -517,11 +532,8 @@ impl WorkflowExecutor {
                         if let Some(ref error) = node_result.error {
                             if matches!(options.error_strategy, ErrorStrategy::Stop) {
                                 result.state = WorkflowState::Failed;
-                                result.error = Some(format!(
-                                    "Node '{}' failed: {}",
-                                    node_id,
-                                    error
-                                ));
+                                result.error =
+                                    Some(format!("Node '{}' failed: {}", node_id, error));
                                 result.node_results.insert(node_id.clone(), node_result);
                                 return Ok(result);
                             }
@@ -622,16 +634,14 @@ mod tests {
         let edge = WorkflowEdge::new("node-1", "node-2").with_condition("status == 200");
         let node_result = NodeExecutionResult {
             node_id: "node-1".to_string(),
-            response: Some(
-                Response::builder()
-                    .status(200)
-                    .build(),
-            ),
+            response: Some(Response::builder().status(200).build()),
             error: None,
             extracted_variables: HashMap::new(),
         };
 
-        let result = executor.evaluate_edge_condition(&edge, &node_result).unwrap();
+        let result = executor
+            .evaluate_edge_condition(&edge, &node_result)
+            .unwrap();
         assert!(result);
     }
 
@@ -645,16 +655,14 @@ mod tests {
         let edge = WorkflowEdge::new("node-1", "node-2").with_condition("status == 404");
         let node_result = NodeExecutionResult {
             node_id: "node-1".to_string(),
-            response: Some(
-                Response::builder()
-                    .status(200)
-                    .build(),
-            ),
+            response: Some(Response::builder().status(200).build()),
             error: None,
             extracted_variables: HashMap::new(),
         };
 
-        let result = executor.evaluate_edge_condition(&edge, &node_result).unwrap();
+        let result = executor
+            .evaluate_edge_condition(&edge, &node_result)
+            .unwrap();
         assert!(!result);
     }
 
@@ -666,16 +674,14 @@ mod tests {
         let edge = WorkflowEdge::new("node-1", "node-2");
         let node_result = NodeExecutionResult {
             node_id: "node-1".to_string(),
-            response: Some(
-                Response::builder()
-                    .status(200)
-                    .build(),
-            ),
+            response: Some(Response::builder().status(200).build()),
             error: None,
             extracted_variables: HashMap::new(),
         };
 
-        let result = executor.evaluate_edge_condition(&edge, &node_result).unwrap();
+        let result = executor
+            .evaluate_edge_condition(&edge, &node_result)
+            .unwrap();
         assert!(result);
     }
 
@@ -694,7 +700,9 @@ mod tests {
             extracted_variables: HashMap::new(),
         };
 
-        let result = executor.evaluate_edge_condition(&edge, &node_result).unwrap();
+        let result = executor
+            .evaluate_edge_condition(&edge, &node_result)
+            .unwrap();
         assert!(result);
     }
 
@@ -720,7 +728,10 @@ mod tests {
             .unwrap();
 
         let options = ExecutionOptions::default();
-        let result = executor.execute_sequential(&workflow, &options).await.unwrap();
+        let result = executor
+            .execute_sequential(&workflow, &options)
+            .await
+            .unwrap();
 
         assert_eq!(result.state, WorkflowState::Done);
         assert_eq!(result.node_results.len(), 2);
@@ -747,7 +758,10 @@ mod tests {
         workflow.add_node(node2).unwrap();
 
         let options = ExecutionOptions::default();
-        let result = executor.execute_parallel(&workflow, &options).await.unwrap();
+        let result = executor
+            .execute_parallel(&workflow, &options)
+            .await
+            .unwrap();
 
         assert_eq!(result.state, WorkflowState::Done);
         assert_eq!(result.node_results.len(), 2);
@@ -765,15 +779,19 @@ mod tests {
                 .method(Method::Get)
                 .url("http://invalid-url-that-will-fail.example")
                 .build()
-                .unwrap()
-        ).with_id("node-1");
+                .unwrap(),
+        )
+        .with_id("node-1");
         workflow.add_node(node1).unwrap();
 
         let options = ExecutionOptions {
             error_strategy: ErrorStrategy::Stop,
             ..Default::default()
         };
-        let result = executor.execute_sequential(&workflow, &options).await.unwrap();
+        let result = executor
+            .execute_sequential(&workflow, &options)
+            .await
+            .unwrap();
 
         assert_eq!(result.state, WorkflowState::Failed);
         assert!(result.error.is_some());
@@ -827,7 +845,10 @@ mod tests {
         workflow.add_node(node1).unwrap();
 
         let options = ExecutionOptions::default();
-        let result = executor.execute_sequential(&workflow, &options).await.unwrap();
+        let result = executor
+            .execute_sequential(&workflow, &options)
+            .await
+            .unwrap();
 
         assert_eq!(result.state, WorkflowState::Done);
     }
@@ -837,10 +858,7 @@ mod tests {
     async fn test_6_20_workflow_cancellation() {
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_delay(std::time::Duration::from_secs(10)),
-            )
+            .respond_with(ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(10)))
             .mount(&mock_server)
             .await;
 
@@ -860,9 +878,10 @@ mod tests {
             cancelled: executor.cancelled.clone(),
         };
 
-        let handle = tokio::spawn(async move {
-            executor_clone.execute_sequential(&workflow, &options).await
-        });
+        let handle =
+            tokio::spawn(
+                async move { executor_clone.execute_sequential(&workflow, &options).await },
+            );
 
         tokio::time::sleep(Duration::from_millis(100)).await;
         executor.cancel();

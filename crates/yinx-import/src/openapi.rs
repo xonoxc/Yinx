@@ -56,8 +56,17 @@ pub struct OpenApiOperation {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum OpenApiParameter {
-    Reference { #[serde(rename = "$ref")] reference: String },
-    Direct { name: String, #[serde(rename = "in")] location: String, required: bool, schema: Option<OpenApiSchema> },
+    Reference {
+        #[serde(rename = "$ref")]
+        reference: String,
+    },
+    Direct {
+        name: String,
+        #[serde(rename = "in")]
+        location: String,
+        required: bool,
+        schema: Option<OpenApiSchema>,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -87,10 +96,27 @@ pub struct OpenApiComponents {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum OpenApiSecurityScheme {
-    Reference { #[serde(rename = "$ref")] reference: String },
-    ApiKey { #[serde(rename = "type")] scheme_type: String, name: String, #[serde(rename = "in")] location: String },
-    Http { #[serde(rename = "type")] scheme_type: String, scheme: String },
-    OAuth2 { #[serde(rename = "type")] scheme_type: String, flows: OpenApiOAuthFlows },
+    Reference {
+        #[serde(rename = "$ref")]
+        reference: String,
+    },
+    ApiKey {
+        #[serde(rename = "type")]
+        scheme_type: String,
+        name: String,
+        #[serde(rename = "in")]
+        location: String,
+    },
+    Http {
+        #[serde(rename = "type")]
+        scheme_type: String,
+        scheme: String,
+    },
+    OAuth2 {
+        #[serde(rename = "type")]
+        scheme_type: String,
+        flows: OpenApiOAuthFlows,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -165,7 +191,13 @@ fn parse_openapi_30(spec: &str) -> Result<Vec<Request>, String> {
     let mut requests = Vec::new();
 
     for (path, path_item) in openapi.paths {
-        add_operation_requests(&path, &path_item, &security_schemes, &global_security, &mut requests);
+        add_operation_requests(
+            &path,
+            &path_item,
+            &security_schemes,
+            &global_security,
+            &mut requests,
+        );
     }
 
     Ok(requests)
@@ -183,7 +215,13 @@ fn parse_swagger_20(spec: &str) -> Result<Vec<Request>, String> {
     let mut requests = Vec::new();
 
     for (path, path_item) in swagger.paths {
-        add_operation_requests(&path, &path_item, &security_schemes, &global_security, &mut requests);
+        add_operation_requests(
+            &path,
+            &path_item,
+            &security_schemes,
+            &global_security,
+            &mut requests,
+        );
     }
 
     Ok(requests)
@@ -271,9 +309,8 @@ fn add_operation_requests(
                     eprintln!("DEBUG: Set Content-Type header result: {:?}", result);
                     eprintln!("DEBUG: Headers after set: {:?}", headers);
                     RequestBody::Json(serde_json::json!({}))
-                } else if let Some(form_content) = req_body
-                    .content
-                    .get("application/x-www-form-urlencoded")
+                } else if let Some(form_content) =
+                    req_body.content.get("application/x-www-form-urlencoded")
                 {
                     let _ = headers.set("Content-Type", "application/x-www-form-urlencoded");
                     RequestBody::Form(vec![])
@@ -299,11 +336,10 @@ fn add_operation_requests(
                     RequestUrl::new("https://example.com").unwrap()
                 })
             } else {
-                RequestUrl::new(&url_to_parse)
-                    .unwrap_or_else(|_| {
-                        eprintln!("DEBUG: Failed to parse URL: {}", url_to_parse);
-                        RequestUrl::new("https://example.com").unwrap()
-                    })
+                RequestUrl::new(&url_to_parse).unwrap_or_else(|_| {
+                    eprintln!("DEBUG: Failed to parse URL: {}", url_to_parse);
+                    RequestUrl::new("https://example.com").unwrap()
+                })
             };
             eprintln!("DEBUG: req_url.as_str() = {}", req_url.as_str());
 
@@ -318,7 +354,10 @@ fn add_operation_requests(
     }
 }
 
-fn apply_security_scheme(scheme: &OpenApiSecurityScheme, headers: &mut yinx_core::request::Headers) {
+fn apply_security_scheme(
+    scheme: &OpenApiSecurityScheme,
+    headers: &mut yinx_core::request::Headers,
+) {
     match scheme {
         OpenApiSecurityScheme::ApiKey {
             scheme_type: _,
@@ -576,7 +615,11 @@ components:
       scheme: bearer
 "#;
         let requests = parse_openapi(yaml).unwrap();
-        assert!(requests[0].headers.get("Authorization").unwrap().starts_with("Bearer"));
+        assert!(requests[0]
+            .headers
+            .get("Authorization")
+            .unwrap()
+            .starts_with("Bearer"));
     }
 
     #[test]
@@ -604,7 +647,11 @@ components:
             read: Read access
 "#;
         let requests = parse_openapi(yaml).unwrap();
-        assert!(requests[0].headers.get("Authorization").unwrap().starts_with("Bearer"));
+        assert!(requests[0]
+            .headers
+            .get("Authorization")
+            .unwrap()
+            .starts_with("Bearer"));
     }
 
     // 5.22: Infer workflow edges from path relationships

@@ -11,6 +11,7 @@ use crossterm::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal as RatatuiTerminal;
 
+use crate::editor::{self, EditorError, EditorFormat, SystemEditorRunner, TerminalSession};
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 #[allow(unused_imports)]
 use yinx_core::state::{ActivePane, InputMode, UiState};
@@ -39,8 +40,7 @@ pub struct TerminalGuard {
 
 impl TerminalGuard {
     pub fn enter_raw_mode() -> Result<Self, AppError> {
-        terminal::enable_raw_mode()
-            .map_err(|e| AppError::TerminalRestore(e.to_string()))?;
+        terminal::enable_raw_mode().map_err(|e| AppError::TerminalRestore(e.to_string()))?;
         Self::hide_cursor()?;
         crossterm::execute!(io::stdout(), EnterAlternateScreen)
             .map_err(|e| AppError::TerminalRestore(e.to_string()))?;
@@ -61,9 +61,27 @@ impl TerminalGuard {
 
     pub fn exit_raw_mode() -> Result<(), AppError> {
         let _ = crossterm::execute!(io::stdout(), LeaveAlternateScreen);
-        terminal::disable_raw_mode()
-            .map_err(|e| AppError::TerminalRestore(e.to_string()))?;
+        terminal::disable_raw_mode().map_err(|e| AppError::TerminalRestore(e.to_string()))?;
         Self::show_cursor()?;
+        Ok(())
+    }
+
+    pub fn suspend(&mut self) -> Result<(), AppError> {
+        if self.raw_mode {
+            Self::exit_raw_mode()?;
+            self.raw_mode = false;
+        }
+        Ok(())
+    }
+
+    pub fn resume(&mut self) -> Result<(), AppError> {
+        if !self.raw_mode {
+            terminal::enable_raw_mode().map_err(|e| AppError::TerminalRestore(e.to_string()))?;
+            Self::hide_cursor()?;
+            crossterm::execute!(io::stdout(), EnterAlternateScreen)
+                .map_err(|e| AppError::TerminalRestore(e.to_string()))?;
+            self.raw_mode = true;
+        }
         Ok(())
     }
 }
@@ -189,6 +207,35 @@ impl App {
         &self.shutdown_flag
     }
 
+    pub fn suspend_terminal(&mut self) -> Result<(), AppError> {
+        self._guard.suspend()
+    }
+
+    pub fn resume_terminal(&mut self) -> Result<(), AppError> {
+        self._guard.resume()
+    }
+
+    pub fn edit_with_external_editor<V>(
+        &mut self,
+        prefix: &str,
+        format: EditorFormat,
+        initial_content: &str,
+        validator: V,
+    ) -> Result<String, AppError>
+    where
+        V: FnOnce(&str) -> Result<(), EditorError>,
+    {
+        editor::edit_with_runner(
+            &mut self._guard,
+            &SystemEditorRunner,
+            prefix,
+            format,
+            initial_content,
+            validator,
+        )
+        .map_err(|err| AppError::Render(err.to_string()))
+    }
+
     pub async fn run(&mut self) -> Result<(), AppError> {
         let mut event_loop = EventLoop::with_input_handler(
             self.event_bus.sender(),
@@ -223,6 +270,16 @@ where
             };
             Err(AppError::Panic(msg))
         }
+    }
+}
+
+impl TerminalSession for TerminalGuard {
+    fn suspend(&mut self) -> Result<(), EditorError> {
+        TerminalGuard::suspend(self).map_err(|err| EditorError::Terminal(err.to_string()))
+    }
+
+    fn resume(&mut self) -> Result<(), EditorError> {
+        TerminalGuard::resume(self).map_err(|err| EditorError::Terminal(err.to_string()))
     }
 }
 
@@ -263,8 +320,7 @@ mod tests {
     async fn test_event_loop_quit() {
         let event_bus = EventBus::new(10);
         let shutdown_flag = Arc::new(AtomicBool::new(false));
-        let mut event_loop =
-            EventLoop::new(event_bus.sender(), shutdown_flag.clone());
+        let mut event_loop = EventLoop::new(event_bus.sender(), shutdown_flag.clone());
         shutdown_flag.store(true, Ordering::SeqCst);
         let result = event_loop.run().await;
         assert!(result.is_ok());
@@ -288,9 +344,7 @@ mod tests {
 
         if let Ok(mut app) = result {
             app.shutdown_flag().store(true, Ordering::SeqCst);
-            let _ = tokio::runtime::Runtime::new()
-                .unwrap()
-                .block_on(app.run());
+            let _ = tokio::runtime::Runtime::new().unwrap().block_on(app.run());
             let result = app.shutdown();
             assert!(result.is_ok());
         }
@@ -469,5 +523,12 @@ mod tests {
         assert!(!flag.load(Ordering::SeqCst));
         flag.store(true, Ordering::SeqCst);
         assert!(flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_terminal_guard_suspend_is_noop_when_inactive() {
+        let mut guard = TerminalGuard { raw_mode: false };
+        assert!(guard.suspend().is_ok());
+        assert!(!guard.raw_mode);
     }
 }

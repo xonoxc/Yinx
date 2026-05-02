@@ -205,7 +205,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("atomic_test.json");
         let mut store = JsonFileStore::new(&path).unwrap();
-        store.set("key".to_string(), serde_json::json!("value")).unwrap();
+        store
+            .set("key".to_string(), serde_json::json!("value"))
+            .unwrap();
         assert!(!path.with_extension("tmp").exists());
         let contents = std::fs::read_to_string(&path).unwrap();
         let parsed: JsonFileStoreData = serde_json::from_str(&contents).unwrap();
@@ -218,7 +220,9 @@ mod tests {
         let path = dir.path().join("persist_test.json");
         {
             let mut store = JsonFileStore::new(&path).unwrap();
-            store.set("key".to_string(), serde_json::json!({"data": [1,2,3]})).unwrap();
+            store
+                .set("key".to_string(), serde_json::json!({"data": [1,2,3]}))
+                .unwrap();
         }
         let store = JsonFileStore::new(&path).unwrap();
         let value = store.get(&"key".to_string()).unwrap();
