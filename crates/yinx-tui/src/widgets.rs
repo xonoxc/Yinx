@@ -1,1 +1,661 @@
-// TODO: Implement widgets
+use ratatui::{
+    layout::{Alignment, Constraint, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{Block, Borders, BorderType, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, Tabs, Wrap},
+    Frame,
+};
+
+use crate::theme::Theme;
+
+pub struct Panel<'a> {
+    title: &'a str,
+    is_active: bool,
+    border_style: Option<BorderType>,
+}
+
+impl<'a> Panel<'a> {
+    pub fn new(title: &'a str) -> Self {
+        Self {
+            title,
+            is_active: false,
+            border_style: None,
+        }
+    }
+
+    pub fn active(mut self, is_active: bool) -> Self {
+        self.is_active = is_active;
+        self
+    }
+
+    pub fn border_type(mut self, border_type: BorderType) -> Self {
+        self.border_style = Some(border_type);
+        self
+    }
+
+    pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let border_color = if self.is_active {
+            theme.border.active_color.as_color()
+        } else {
+            theme.border.color.as_color()
+        };
+
+        let border_type = match self.border_style.or(Some(match theme.border.style {
+            crate::theme::BorderType::Plain => BorderType::Plain,
+            crate::theme::BorderType::Rounded => BorderType::Rounded,
+            crate::theme::BorderType::Double => BorderType::Double,
+            crate::theme::BorderType::Thick => BorderType::Thick,
+        })) {
+            Some(BorderType::Plain) => BorderType::Plain,
+            Some(BorderType::Rounded) => BorderType::Rounded,
+            Some(BorderType::Double) => BorderType::Double,
+            Some(BorderType::Thick) => BorderType::Thick,
+            _ => BorderType::Rounded,
+        };
+
+        let block = Block::default()
+            .title(self.title)
+            .borders(Borders::ALL)
+            .border_type(border_type)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(theme.pane.background.as_color()));
+
+        frame.render_widget(block, area);
+    }
+}
+
+pub struct ScrollableList<'a> {
+    items: Vec<String>,
+    selected: Option<usize>,
+    title: Option<&'a str>,
+}
+
+impl<'a> ScrollableList<'a> {
+    pub fn new(items: Vec<String>) -> Self {
+        Self {
+            items,
+            selected: None,
+            title: None,
+        }
+    }
+
+    pub fn with_selected(mut self, selected: Option<usize>) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    pub fn with_title(mut self, title: &'a str) -> Self {
+        self.title = Some(title);
+        self
+    }
+
+    pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let items: Vec<ListItem> = self
+            .items
+            .iter()
+            .map(|i| ListItem::new(i.as_str()))
+            .collect();
+
+        let list = List::new(items)
+            .highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color())
+                    .add_modifier(Modifier::BOLD),
+            )
+            .highlight_symbol(">> ");
+
+        let mut state = ListState::default();
+        if let Some(sel) = self.selected {
+            state.select(Some(sel));
+        }
+
+        let block = if let Some(title) = self.title {
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .style(Style::default().bg(theme.pane.background.as_color()))
+        } else {
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .style(Style::default().bg(theme.pane.background.as_color()))
+        };
+
+        let list = list.block(block);
+        frame.render_stateful_widget(list, area, &mut state);
+    }
+}
+
+pub struct TableWidget<'a> {
+    headers: Vec<&'a str>,
+    rows: Vec<Vec<String>>,
+    selected_row: Option<usize>,
+    sort_col: Option<usize>,
+    sort_asc: bool,
+}
+
+impl<'a> TableWidget<'a> {
+    pub fn new(headers: Vec<&'a str>) -> Self {
+        Self {
+            headers,
+            rows: Vec::new(),
+            selected_row: None,
+            sort_col: None,
+            sort_asc: true,
+        }
+    }
+
+    pub fn with_rows(mut self, rows: Vec<Vec<String>>) -> Self {
+        self.rows = rows;
+        self
+    }
+
+    pub fn with_selected(mut self, selected: Option<usize>) -> Self {
+        self.selected_row = selected;
+        self
+    }
+
+    pub fn with_sort(mut self, col: Option<usize>, asc: bool) -> Self {
+        self.sort_col = col;
+        self.sort_asc = asc;
+        self
+    }
+
+    pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let header_cells: Vec<Cell> = self
+            .headers
+            .iter()
+            .map(|h| {
+                let mut text = h.to_string();
+                if let Some(col) = self.sort_col {
+                    if col < self.headers.len() && self.headers[col] == *h {
+                        text.push_str(if self.sort_asc { " ▲" } else { " ▼" });
+                    }
+                }
+                Cell::from(text).style(
+                    Style::default()
+                        .fg(theme.pane.title.as_color())
+                        .add_modifier(Modifier::BOLD),
+                )
+            })
+            .collect();
+
+        let header = Row::new(header_cells).height(1);
+
+        let rows: Vec<Row> = self
+            .rows
+            .iter()
+            .map(|row| {
+                let cells: Vec<Cell> = row.iter().map(|c| Cell::from(c.as_str())).collect();
+                Row::new(cells).height(1)
+            })
+            .collect();
+
+        let constraints: Vec<Constraint> = self
+            .headers
+            .iter()
+            .map(|_| Constraint::Percentage(100 / self.headers.len().max(1) as u16))
+            .collect();
+
+        let table = Table::new(rows, &constraints)
+            .header(header)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color())),
+            )
+            .row_highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color()),
+            )
+            .column_spacing(1);
+
+        let mut state = ratatui::widgets::TableState::default();
+        if let Some(sel) = self.selected_row {
+            state.select(Some(sel));
+        }
+
+        frame.render_stateful_widget(table, area, &mut state);
+    }
+}
+
+pub struct TabsWidget<'a> {
+    titles: Vec<&'a str>,
+    selected: usize,
+}
+
+impl<'a> TabsWidget<'a> {
+    pub fn new(titles: Vec<&'a str>) -> Self {
+        Self {
+            titles,
+            selected: 0,
+        }
+    }
+
+    pub fn with_selected(mut self, selected: usize) -> Self {
+        self.selected = selected.min(self.titles.len().saturating_sub(1));
+        self
+    }
+
+    pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let titles: Vec<Line> = self
+            .titles
+            .iter()
+            .map(|t| Line::from(t.to_string()))
+            .collect();
+
+        let tabs = Tabs::new(titles)
+            .select(self.selected)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color())),
+            )
+            .style(Style::default().bg(theme.pane.background.as_color()))
+            .highlight_style(
+                Style::default()
+                    .fg(theme.highlight.selected_fg.as_color())
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            );
+
+        frame.render_widget(tabs, area);
+    }
+}
+
+pub struct InputField<'a> {
+    content: &'a str,
+    cursor_pos: usize,
+    title: Option<&'a str>,
+}
+
+impl<'a> InputField<'a> {
+    pub fn new(content: &'a str) -> Self {
+        Self {
+            content,
+            cursor_pos: content.len(),
+            title: None,
+        }
+    }
+
+    pub fn with_cursor(mut self, cursor_pos: usize) -> Self {
+        self.cursor_pos = cursor_pos.min(self.content.len());
+        self
+    }
+
+    pub fn with_title(mut self, title: &'a str) -> Self {
+        self.title = Some(title);
+        self
+    }
+
+    pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let block = if let Some(title) = self.title {
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .style(Style::default().bg(theme.highlight.bg.as_color()))
+        } else {
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .style(Style::default().bg(theme.highlight.bg.as_color()))
+        };
+
+        let paragraph = Paragraph::new(self.content)
+            .block(block)
+            .style(Style::default().fg(theme.highlight.fg.as_color()))
+            .wrap(Wrap { trim: true });
+
+        frame.render_widget(paragraph, area);
+
+        if self.cursor_pos <= self.content.len() {
+            let x_offset = self.content[..self.cursor_pos].chars().count() as u16;
+            frame.set_cursor_position(ratatui::prelude::Position::new(
+                area.x + 1 + x_offset,
+                area.y + 1,
+            ));
+        }
+    }
+}
+
+pub struct StatusBar<'a> {
+    hints: Vec<(&'a str, &'a str)>,
+    mode: &'a str,
+}
+
+impl<'a> StatusBar<'a> {
+    pub fn new(mode: &'a str) -> Self {
+        Self {
+            hints: Vec::new(),
+            mode,
+        }
+    }
+
+    pub fn with_hints(mut self, hints: Vec<(&'a str, &'a str)>) -> Self {
+        self.hints = hints;
+        self
+    }
+
+    pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let mode_span = Span::styled(
+            self.mode,
+            Style::default()
+                .fg(theme.semantic.info.as_color())
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let hint_spans: Vec<Span> = self
+            .hints
+            .iter()
+            .flat_map(|(key, desc)| {
+                vec![
+                    Span::styled(
+                        *key,
+                        Style::default().fg(theme.semantic.warning.as_color()),
+                    ),
+                    Span::raw(": "),
+                    Span::styled(
+                        *desc,
+                        Style::default().fg(theme.foreground.as_color()),
+                    ),
+                    Span::raw("  "),
+                ]
+            })
+            .collect();
+
+        let mut line = vec![mode_span, Span::raw(" | ")];
+        line.extend(hint_spans);
+
+        let paragraph = Paragraph::new(Line::from(line))
+            .style(
+                Style::default()
+                    .bg(theme.pane.status_bar_bg.as_color())
+                    .fg(theme.pane.status_bar_fg.as_color()),
+            )
+            .alignment(Alignment::Left);
+
+        frame.render_widget(paragraph, area);
+    }
+}
+
+pub struct Modal<'a> {
+    title: &'a str,
+    content: Vec<Line<'a>>,
+    actions: Vec<(&'a str, &'a str)>,
+    selected_action: usize,
+}
+
+impl<'a> Modal<'a> {
+    pub fn new(title: &'a str) -> Self {
+        Self {
+            title,
+            content: Vec::new(),
+            actions: Vec::new(),
+            selected_action: 0,
+        }
+    }
+
+    pub fn with_content(mut self, content: Vec<Line<'a>>) -> Self {
+        self.content = content;
+        self
+    }
+
+    pub fn with_actions(mut self, actions: Vec<(&'a str, &'a str)>) -> Self {
+        self.actions = actions;
+        self
+    }
+
+    pub fn with_selected_action(mut self, selected: usize) -> Self {
+        self.selected_action = selected.min(self.actions.len().saturating_sub(1));
+        self
+    }
+
+    pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let popup_area = centered_rect(60, 40, area);
+
+        frame.render_widget(Clear, popup_area);
+
+        let block = Block::default()
+            .title(self.title)
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(
+                Style::default().fg(theme.border.active_color.as_color()),
+            )
+            .style(
+                Style::default()
+                    .bg(theme.pane.background.as_color())
+                    .fg(theme.foreground.as_color()),
+            );
+
+        let inner = block.inner(popup_area);
+        frame.render_widget(block, popup_area);
+
+        let mut lines = self.content.clone();
+        lines.push(Line::from(""));
+        lines.push(Line::from(vec![
+            Span::raw("Actions: "),
+        ]));
+
+        for (i, (key, label)) in self.actions.iter().enumerate() {
+            let style = if i == self.selected_action {
+                Style::default()
+                    .fg(theme.highlight.selected_fg.as_color())
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme.foreground.as_color())
+            };
+            lines.push(Line::from(vec![
+                Span::styled(format!("[{}] {}", key, label), style),
+            ]));
+        }
+
+        let paragraph = Paragraph::new(lines)
+            .style(Style::default().fg(theme.foreground.as_color()))
+            .wrap(Wrap { trim: true });
+
+        frame.render_widget(paragraph, inner);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    ratatui::layout::Layout::default()
+        .direction(ratatui::layout::Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::theme::Theme;
+
+    #[test]
+    fn test_panel_new() {
+        let panel = Panel::new("Test");
+        assert_eq!(panel.title, "Test");
+        assert!(!panel.is_active);
+    }
+
+    #[test]
+    fn test_panel_active() {
+        let panel = Panel::new("Test").active(true);
+        assert!(panel.is_active);
+    }
+
+    #[test]
+    fn test_panel_border_type() {
+        let panel = Panel::new("Test").border_type(BorderType::Double);
+        assert!(panel.border_style.is_some());
+    }
+
+    #[test]
+    fn test_scrollable_list_new() {
+        let items = vec!["a".to_string(), "b".to_string()];
+        let list = ScrollableList::new(items);
+        assert_eq!(list.items.len(), 2);
+    }
+
+    #[test]
+    fn test_scrollable_list_with_selected() {
+        let items = vec!["a".to_string(), "b".to_string(), "c".to_string()];
+        let list = ScrollableList::new(items).with_selected(Some(1));
+        assert_eq!(list.selected, Some(1));
+    }
+
+    #[test]
+    fn test_scrollable_list_with_title() {
+        let items = vec!["a".to_string()];
+        let list = ScrollableList::new(items).with_title("My List");
+        assert_eq!(list.title, Some("My List"));
+    }
+
+    #[test]
+    fn test_table_widget_new() {
+        let headers = vec!["Name", "Value"];
+        let table = TableWidget::new(headers.clone());
+        assert_eq!(table.headers.len(), 2);
+    }
+
+    #[test]
+    fn test_table_widget_with_rows() {
+        let headers = vec!["Name", "Value"];
+        let rows = vec![
+            vec!["foo".to_string(), "1".to_string()],
+            vec!["bar".to_string(), "2".to_string()],
+        ];
+        let table = TableWidget::new(headers).with_rows(rows.clone());
+        assert_eq!(table.rows.len(), 2);
+    }
+
+    #[test]
+    fn test_table_widget_with_sort() {
+        let headers = vec!["Name"];
+        let table = TableWidget::new(headers)
+            .with_sort(Some(0), false);
+        assert_eq!(table.sort_col, Some(0));
+        assert!(!table.sort_asc);
+    }
+
+    #[test]
+    fn test_tabs_widget_new() {
+        let titles = vec!["Tab1", "Tab2", "Tab3"];
+        let tabs = TabsWidget::new(titles.clone());
+        assert_eq!(tabs.titles.len(), 3);
+    }
+
+    #[test]
+    fn test_tabs_widget_with_selected() {
+        let titles = vec!["Tab1", "Tab2", "Tab3"];
+        let tabs = TabsWidget::new(titles).with_selected(2);
+        assert_eq!(tabs.selected, 2);
+    }
+
+    #[test]
+    fn test_tabs_widget_selected_out_of_bounds() {
+        let titles = vec!["Tab1", "Tab2"];
+        let tabs = TabsWidget::new(titles).with_selected(10);
+        assert_eq!(tabs.selected, 1);
+    }
+
+    #[test]
+    fn test_input_field_new() {
+        let field = InputField::new("hello");
+        assert_eq!(field.content, "hello");
+        assert_eq!(field.cursor_pos, 5);
+    }
+
+    #[test]
+    fn test_input_field_with_cursor() {
+        let field = InputField::new("hello").with_cursor(2);
+        assert_eq!(field.cursor_pos, 2);
+    }
+
+    #[test]
+    fn test_input_field_cursor_out_of_bounds() {
+        let field = InputField::new("hi").with_cursor(100);
+        assert_eq!(field.cursor_pos, 2);
+    }
+
+    #[test]
+    fn test_status_bar_new() {
+        let bar = StatusBar::new("Normal");
+        assert_eq!(bar.mode, "Normal");
+        assert!(bar.hints.is_empty());
+    }
+
+    #[test]
+    fn test_status_bar_with_hints() {
+        let hints = vec![("q", "quit"), ("i", "insert")];
+        let bar = StatusBar::new("Normal").with_hints(hints);
+        assert_eq!(bar.hints.len(), 2);
+    }
+
+    #[test]
+    fn test_modal_new() {
+        let modal = Modal::new("Confirm");
+        assert_eq!(modal.title, "Confirm");
+        assert!(modal.content.is_empty());
+    }
+
+    #[test]
+    fn test_modal_with_actions() {
+        let actions = vec![("y", "Yes"), ("n", "No")];
+        let modal = Modal::new("Confirm").with_actions(actions);
+        assert_eq!(modal.actions.len(), 2);
+    }
+
+    #[test]
+    fn test_modal_with_selected_action() {
+        let actions = vec![("y", "Yes"), ("n", "No")];
+        let modal = Modal::new("Confirm")
+            .with_actions(actions)
+            .with_selected_action(1);
+        assert_eq!(modal.selected_action, 1);
+    }
+
+    #[test]
+    fn test_modal_selected_action_out_of_bounds() {
+        let actions = vec![("y", "Yes")];
+        let modal = Modal::new("Confirm")
+            .with_actions(actions)
+            .with_selected_action(10);
+        assert_eq!(modal.selected_action, 0);
+    }
+
+    #[test]
+    fn test_centered_rect() {
+        let area = Rect::new(0, 0, 100, 50);
+        let result = centered_rect(50, 30, area);
+        assert!(result.width > 0);
+        assert!(result.height > 0);
+    }
+
+    #[test]
+    fn test_theme_dark_has_colors() {
+        let theme = Theme::dark();
+        let _ = theme.background.as_color();
+        let _ = theme.foreground.as_color();
+        let _ = theme.border.color.as_color();
+        let _ = theme.highlight.selected_bg.as_color();
+        let _ = theme.semantic.success.as_color();
+    }
+}
