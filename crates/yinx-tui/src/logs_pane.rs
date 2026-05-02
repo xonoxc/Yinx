@@ -1,0 +1,888 @@
+use std::collections::VecDeque;
+use chrono::{DateTime, Utc};
+use ratatui::{
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    style::{Modifier, Style},
+    text::{Line, Span},
+    widgets::{BarChart, Block, Borders, BorderType, List, ListItem, ListState, Paragraph, Tabs, Wrap},
+    Frame,
+};
+use crossterm::event::{KeyCode, KeyModifiers};
+
+use yinx_core::timing::{RequestMetrics, Timing};
+
+use crate::theme::Theme;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogsTab {
+    Logs,
+    Metrics,
+    Histogram,
+    Errors,
+}
+
+impl LogsTab {
+    pub fn all() -> Vec<LogsTab> {
+        vec![LogsTab::Logs, LogsTab::Metrics, LogsTab::Histogram, LogsTab::Errors]
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogsTab::Logs => "Logs",
+            LogsTab::Metrics => "Metrics",
+            LogsTab::Histogram => "Histogram",
+            LogsTab::Errors => "Errors",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LogLevel {
+    Debug,
+    Info,
+    Warning,
+    Error,
+}
+
+impl LogLevel {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            LogLevel::Debug => "DEBUG",
+            LogLevel::Info => "INFO",
+            LogLevel::Warning => "WARN",
+            LogLevel::Error => "ERROR",
+        }
+    }
+
+    pub fn all() -> Vec<LogLevel> {
+        vec![LogLevel::Debug, LogLevel::Info, LogLevel::Warning, LogLevel::Error]
+    }
+}
+
+impl std::fmt::Display for LogLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub timestamp: DateTime<Utc>,
+    pub level: LogLevel,
+    pub message: String,
+    pub context: Option<String>,
+}
+
+impl LogEntry {
+    pub fn new(level: LogLevel, message: impl Into<String>) -> Self {
+        Self {
+            timestamp: Utc::now(),
+            level,
+            message: message.into(),
+            context: None,
+        }
+    }
+
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
+        self.context = Some(context.into());
+        self
+    }
+
+    pub fn format_timestamp(&self) -> String {
+        self.timestamp.format("%H:%M:%S%.3f").to_string()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FocusedField {
+    Tabs,
+    TabContent,
+}
+
+pub struct LogsPane {
+    logs: VecDeque<LogEntry>,
+    max_logs: usize,
+    selected_tab: usize,
+    selected_log: usize,
+    focused_field: FocusedField,
+    metrics: Option<RequestMetrics>,
+    chunk_intervals: VecDeque<u64>,
+    max_intervals: usize,
+    errors: Vec<LogEntry>,
+    selected_error: usize,
+}
+
+impl Default for LogsPane {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LogsPane {
+    pub fn new() -> Self {
+        Self {
+            logs: VecDeque::new(),
+            max_logs: 1000,
+            selected_tab: 0,
+            selected_log: 0,
+            focused_field: FocusedField::TabContent,
+            metrics: None,
+            chunk_intervals: VecDeque::new(),
+            max_intervals: 50,
+            errors: Vec::new(),
+            selected_error: 0,
+        }
+    }
+
+    pub fn with_max_logs(mut self, max: usize) -> Self {
+        self.max_logs = max;
+        self
+    }
+
+    pub fn add_log(&mut self, level: LogLevel, message: impl Into<String>) {
+        let entry = LogEntry::new(level, message);
+        self.logs.push_back(entry.clone());
+
+        if level == LogLevel::Error {
+            self.errors.push(entry);
+        }
+
+        while self.logs.len() > self.max_logs {
+            if let Some(removed) = self.logs.pop_front() {
+                if removed.level == LogLevel::Error {
+                    self.errors.retain(|e| e.timestamp != removed.timestamp);
+                }
+            }
+        }
+    }
+
+    pub fn add_log_with_context(
+        &mut self,
+        level: LogLevel,
+        message: impl Into<String>,
+        context: impl Into<String>,
+    ) {
+        let entry = LogEntry::new(level, message).with_context(context);
+        self.logs.push_back(entry.clone());
+
+        if level == LogLevel::Error {
+            self.errors.push(entry);
+        }
+
+        while self.logs.len() > self.max_logs {
+            if let Some(removed) = self.logs.pop_front() {
+                if removed.level == LogLevel::Error {
+                    self.errors.retain(|e| e.timestamp != removed.timestamp);
+                }
+            }
+        }
+    }
+
+    pub fn set_metrics(&mut self, metrics: RequestMetrics) {
+        self.metrics = Some(metrics);
+    }
+
+    pub fn clear_metrics(&mut self) {
+        self.metrics = None;
+    }
+
+    pub fn add_chunk_interval(&mut self, interval_ms: u64) {
+        self.chunk_intervals.push_back(interval_ms);
+        while self.chunk_intervals.len() > self.max_intervals {
+            self.chunk_intervals.pop_front();
+        }
+    }
+
+    pub fn clear_logs(&mut self) {
+        self.logs.clear();
+        self.errors.clear();
+        self.selected_log = 0;
+        self.selected_error = 0;
+    }
+
+    pub fn handle_key(&mut self, key_code: KeyCode, _modifiers: KeyModifiers) -> bool {
+        match self.focused_field {
+            FocusedField::Tabs => self.handle_tabs_key(key_code),
+            FocusedField::TabContent => self.handle_content_key(key_code),
+        }
+    }
+
+    fn handle_tabs_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Left => {
+                self.selected_tab = self.selected_tab.saturating_sub(1);
+                true
+            }
+            KeyCode::Right => {
+                self.selected_tab = (self.selected_tab + 1).min(LogsTab::all().len() - 1);
+                true
+            }
+            KeyCode::Enter | KeyCode::Char('l') => {
+                self.focused_field = FocusedField::TabContent;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_content_key(&mut self, key_code: KeyCode) -> bool {
+        let tab = LogsTab::all()[self.selected_tab];
+        match tab {
+            LogsTab::Logs => self.handle_logs_key(key_code),
+            LogsTab::Metrics => self.handle_metrics_key(key_code),
+            LogsTab::Histogram => self.handle_histogram_key(key_code),
+            LogsTab::Errors => self.handle_errors_key(key_code),
+        }
+    }
+
+    fn handle_logs_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.selected_log = self.selected_log.saturating_sub(1);
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.selected_log = (self.selected_log + 1).min(self.logs.len().saturating_sub(1));
+                true
+            }
+            KeyCode::Char('g') => {
+                self.selected_log = 0;
+                true
+            }
+            KeyCode::Char('G') => {
+                self.selected_log = self.logs.len().saturating_sub(1);
+                true
+            }
+            KeyCode::Tab => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_metrics_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Tab => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_histogram_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Tab => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_errors_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.selected_error = self.selected_error.saturating_sub(1);
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.selected_error = (self.selected_error + 1).min(self.errors.len().saturating_sub(1));
+                true
+            }
+            KeyCode::Char('g') => {
+                self.selected_error = 0;
+                true
+            }
+            KeyCode::Char('G') => {
+                self.selected_error = self.errors.len().saturating_sub(1);
+                true
+            }
+            KeyCode::Tab => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let border_color = if is_active {
+            theme.border.active_color.as_color()
+        } else {
+            theme.border.color.as_color()
+        };
+
+        let block = Block::default()
+            .title("Logs / Metrics")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(theme.pane.background.as_color()));
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![
+                Constraint::Length(3),
+                Constraint::Min(0),
+            ])
+            .split(inner);
+
+        self.render_tabs(frame, chunks[0], theme);
+        self.render_content(frame, chunks[1], theme, is_active);
+    }
+
+    fn render_tabs(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let titles: Vec<Line> = LogsTab::all()
+            .iter()
+            .map(|t| Line::from(t.as_str()))
+            .collect();
+
+        let tabs = Tabs::new(titles)
+            .select(self.selected_tab)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color())),
+            )
+            .style(Style::default().bg(theme.pane.background.as_color()))
+            .highlight_style(
+                Style::default()
+                    .fg(theme.highlight.selected_fg.as_color())
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            );
+
+        frame.render_widget(tabs, area);
+    }
+
+    fn render_content(&self, frame: &mut Frame, area: Rect, theme: &Theme, _is_active: bool) {
+        let tab = LogsTab::all()[self.selected_tab];
+        match tab {
+            LogsTab::Logs => self.render_logs(frame, area, theme),
+            LogsTab::Metrics => self.render_metrics(frame, area, theme),
+            LogsTab::Histogram => self.render_histogram(frame, area, theme),
+            LogsTab::Errors => self.render_errors(frame, area, theme),
+        }
+    }
+
+    fn render_logs(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let logs: Vec<ListItem> = self
+            .logs
+            .iter()
+            .map(|entry| {
+                let color = match entry.level {
+                    LogLevel::Debug => theme.semantic.info.as_color(),
+                    LogLevel::Info => theme.foreground.as_color(),
+                    LogLevel::Warning => theme.semantic.warning.as_color(),
+                    LogLevel::Error => theme.semantic.error.as_color(),
+                };
+
+                let spans = vec![
+                    Span::styled(entry.format_timestamp(), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::raw(" "),
+                    Span::styled(entry.level.as_str(), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+                    Span::raw(" "),
+                    Span::styled(&entry.message, Style::default().fg(color)),
+                ];
+
+                if let Some(ref context) = entry.context {
+                    let mut all_spans = spans;
+                    all_spans.push(Span::raw(" "));
+                    all_spans.push(Span::styled(
+                        format!("[{}]", context),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ));
+                    ListItem::new(Line::from(all_spans))
+                } else {
+                    ListItem::new(Line::from(spans))
+                }
+            })
+            .collect();
+
+        let list = List::new(logs)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color())),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color()),
+            )
+            .highlight_symbol(">> ");
+
+        let mut state = ListState::default();
+        if !self.logs.is_empty() {
+            state.select(Some(self.selected_log));
+        }
+
+        frame.render_stateful_widget(list, area, &mut state);
+    }
+
+    fn render_metrics(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        if let Some(ref metrics) = self.metrics {
+            let mut lines = Vec::new();
+
+            // Status code
+            if let Some(status) = metrics.status_code {
+                let status_color = if (200..300).contains(&status) {
+                    theme.semantic.success.as_color()
+                } else if (300..400).contains(&status) {
+                    theme.semantic.info.as_color()
+                } else if (400..500).contains(&status) {
+                    theme.semantic.warning.as_color()
+                } else {
+                    theme.semantic.error.as_color()
+                };
+
+                lines.push(Line::from(vec![
+                    Span::styled("Status: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(status.to_string(), Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+                ]));
+            }
+
+            // Timing
+            let timing = &metrics.timing;
+            if let Some(ttfb) = timing.ttfb_ms {
+                lines.push(Line::from(vec![
+                    Span::styled("TTFB: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(format!("{}ms", ttfb), Style::default().fg(theme.semantic.info.as_color())),
+                ]));
+            }
+
+            if let Some(total) = timing.total_ms {
+                lines.push(Line::from(vec![
+                    Span::styled("Duration: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(format!("{}ms", total), Style::default().fg(theme.semantic.info.as_color())),
+                ]));
+            }
+
+            if let Some(dns) = timing.dns_ms {
+                lines.push(Line::from(vec![
+                    Span::styled("DNS: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(format!("{}ms", dns), Style::default().fg(theme.semantic.info.as_color())),
+                ]));
+            }
+
+            if let Some(connect) = timing.connect_ms {
+                lines.push(Line::from(vec![
+                    Span::styled("Connect: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(format!("{}ms", connect), Style::default().fg(theme.semantic.info.as_color())),
+                ]));
+            }
+
+            if let Some(tls) = timing.tls_ms {
+                lines.push(Line::from(vec![
+                    Span::styled("TLS: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(format!("{}ms", tls), Style::default().fg(theme.semantic.info.as_color())),
+                ]));
+            }
+
+            // Body size
+            if metrics.body_size > 0 {
+                lines.push(Line::from(vec![
+                    Span::styled("Body Size: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        format_bytes(metrics.body_size),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
+                ]));
+            }
+
+            // Retries
+            if metrics.retries > 0 {
+                lines.push(Line::from(vec![
+                    Span::styled("Retries: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        metrics.retries.to_string(),
+                        Style::default().fg(theme.semantic.warning.as_color()),
+                    ),
+                ]));
+            }
+
+            let paragraph = Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border.color.as_color()))
+                        .style(Style::default().bg(theme.pane.background.as_color())),
+                )
+                .wrap(Wrap { trim: true });
+
+            frame.render_widget(paragraph, area);
+        } else {
+            let paragraph = Paragraph::new("No metrics available. Send a request to see metrics.")
+                .style(Style::default().fg(theme.foreground.as_color()))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border.color.as_color()))
+                        .style(Style::default().bg(theme.pane.background.as_color())),
+                )
+                .alignment(Alignment::Center);
+
+            frame.render_widget(paragraph, area);
+        }
+    }
+
+    fn render_histogram(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        if self.chunk_intervals.is_empty() {
+            let paragraph = Paragraph::new("No chunk data available. Start streaming to see the histogram.")
+                .style(Style::default().fg(theme.foreground.as_color()))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border.color.as_color()))
+                        .style(Style::default().bg(theme.pane.background.as_color())),
+                )
+                .alignment(Alignment::Center);
+
+            frame.render_widget(paragraph, area);
+            return;
+        }
+
+        // Create histogram buckets
+        let intervals: Vec<u64> = self.chunk_intervals.iter().copied().collect();
+        let max_interval = intervals.iter().max().copied().unwrap_or(1);
+        let bucket_count = 10.min(intervals.len());
+        let bucket_size = (max_interval as f64 / bucket_count as f64).ceil() as u64 + 1;
+
+        let mut buckets = vec![0u64; bucket_count];
+        for &interval in &intervals {
+            let bucket_idx = ((interval as f64 / bucket_size as f64).floor() as usize).min(bucket_count - 1);
+            buckets[bucket_idx] += 1;
+        }
+
+        let bar_labels: Vec<String> = buckets
+            .iter()
+            .enumerate()
+            .map(|(i, _)| format!("{}", i * bucket_size as usize))
+            .collect();
+
+        let bar_data: Vec<(&str, u64)> = bar_labels
+            .iter()
+            .zip(buckets.iter())
+            .map(|(label, &count)| (label.as_str(), count))
+            .collect();
+
+        let barchart = BarChart::default()
+            .block(
+                Block::default()
+                    .title("Chunk Interval Histogram (ms)")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color())),
+            )
+            .bar_width(8)
+            .bar_gap(1)
+            .bar_style(Style::default().fg(theme.semantic.info.as_color()))
+            .value_style(
+                Style::default()
+                    .fg(theme.pane.background.as_color())
+                    .bg(theme.semantic.info.as_color()),
+            )
+            .data(&bar_data);
+
+        frame.render_widget(barchart, area);
+    }
+
+    fn render_errors(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        if self.errors.is_empty() {
+            let paragraph = Paragraph::new("No errors logged.")
+                .style(Style::default().fg(theme.foreground.as_color()))
+                .block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border.color.as_color()))
+                        .style(Style::default().bg(theme.pane.background.as_color())),
+                )
+                .alignment(Alignment::Center);
+
+            frame.render_widget(paragraph, area);
+            return;
+        }
+
+        let error_items: Vec<ListItem> = self
+            .errors
+            .iter()
+            .map(|entry| {
+                let mut spans = vec![
+                    Span::styled(entry.format_timestamp(), Style::default().fg(theme.semantic.info.as_color())),
+                    Span::raw(" "),
+                    Span::styled("ERROR", Style::default().fg(theme.semantic.error.as_color()).add_modifier(Modifier::BOLD)),
+                    Span::raw(" "),
+                    Span::styled(&entry.message, Style::default().fg(theme.semantic.error.as_color())),
+                ];
+
+                if let Some(ref context) = entry.context {
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
+                        format!("\n  Context: {}", context),
+                        Style::default().fg(theme.foreground.as_color()),
+                    ));
+                }
+
+                ListItem::new(Line::from(spans))
+            })
+            .collect();
+
+        let list = List::new(error_items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color())),
+            )
+            .highlight_style(
+                Style::default()
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color()),
+            )
+            .highlight_symbol(">> ");
+
+        let mut state = ListState::default();
+        state.select(Some(self.selected_error));
+
+        frame.render_stateful_widget(list, area, &mut state);
+    }
+}
+
+fn format_bytes(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{} B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.2} KB", bytes as f64 / 1024.0)
+    } else if bytes < 1024 * 1024 * 1024 {
+        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+use yinx_core::timing::RequestMetrics;
+    use crossterm::event::{KeyCode, KeyModifiers};
+
+    #[test]
+    fn test_logs_tab_all() {
+        let tabs = LogsTab::all();
+        assert_eq!(tabs.len(), 4);
+    }
+
+    #[test]
+    fn test_logs_tab_as_str() {
+        assert_eq!(LogsTab::Logs.as_str(), "Logs");
+        assert_eq!(LogsTab::Metrics.as_str(), "Metrics");
+        assert_eq!(LogsTab::Histogram.as_str(), "Histogram");
+        assert_eq!(LogsTab::Errors.as_str(), "Errors");
+    }
+
+    #[test]
+    fn test_log_level_as_str() {
+        assert_eq!(LogLevel::Debug.as_str(), "DEBUG");
+        assert_eq!(LogLevel::Info.as_str(), "INFO");
+        assert_eq!(LogLevel::Warning.as_str(), "WARN");
+        assert_eq!(LogLevel::Error.as_str(), "ERROR");
+    }
+
+    #[test]
+    fn test_log_level_all() {
+        let levels = LogLevel::all();
+        assert_eq!(levels.len(), 4);
+    }
+
+    #[test]
+    fn test_log_entry_new() {
+        let entry = LogEntry::new(LogLevel::Info, "test message");
+        assert_eq!(entry.level, LogLevel::Info);
+        assert_eq!(entry.message, "test message");
+        assert!(entry.context.is_none());
+    }
+
+    #[test]
+    fn test_log_entry_with_context() {
+        let entry = LogEntry::new(LogLevel::Error, "error occurred")
+            .with_context("stack trace here");
+        assert_eq!(entry.context, Some("stack trace here".to_string()));
+    }
+
+    #[test]
+    fn test_logs_pane_new() {
+        let pane = LogsPane::new();
+        assert_eq!(pane.selected_tab, 0);
+        assert!(pane.logs.is_empty());
+        assert!(pane.metrics.is_none());
+    }
+
+    #[test]
+    fn test_logs_pane_add_log() {
+        let mut pane = LogsPane::new();
+        pane.add_log(LogLevel::Info, "test message");
+        assert_eq!(pane.logs.len(), 1);
+        assert_eq!(pane.logs[0].level, LogLevel::Info);
+    }
+
+    #[test]
+    fn test_logs_pane_add_error_log() {
+        let mut pane = LogsPane::new();
+        pane.add_log(LogLevel::Error, "error message");
+        assert_eq!(pane.errors.len(), 1);
+        assert_eq!(pane.errors[0].message, "error message");
+    }
+
+    #[test]
+    fn test_logs_pane_add_log_with_context() {
+        let mut pane = LogsPane::new();
+        pane.add_log_with_context(LogLevel::Error, "error", "context info");
+        assert_eq!(pane.logs.len(), 1);
+        assert_eq!(pane.errors.len(), 1);
+    }
+
+    #[test]
+    fn test_logs_pane_max_logs() {
+        let mut pane = LogsPane::new().with_max_logs(3);
+        pane.add_log(LogLevel::Info, "msg1");
+        pane.add_log(LogLevel::Info, "msg2");
+        pane.add_log(LogLevel::Info, "msg3");
+        pane.add_log(LogLevel::Info, "msg4");
+        assert_eq!(pane.logs.len(), 3);
+    }
+
+    #[test]
+    fn test_logs_pane_set_metrics() {
+        let mut pane = LogsPane::new();
+        let timing = Timing::new()
+            .with_ttfb(100)
+            .with_total(200);
+        let metrics = RequestMetrics::new()
+            .with_timing(timing)
+            .with_status_code(200);
+        pane.set_metrics(metrics);
+        assert!(pane.metrics.is_some());
+        assert_eq!(pane.metrics.unwrap().status_code, Some(200));
+    }
+
+    #[test]
+    fn test_logs_pane_clear_metrics() {
+        let mut pane = LogsPane::new();
+        let timing = Timing::new().with_total(100);
+        let metrics = RequestMetrics::new().with_timing(timing);
+        pane.set_metrics(metrics);
+        pane.clear_metrics();
+        assert!(pane.metrics.is_none());
+    }
+
+    #[test]
+    fn test_logs_pane_add_chunk_interval() {
+        let mut pane = LogsPane::new();
+        pane.add_chunk_interval(50);
+        pane.add_chunk_interval(75);
+        assert_eq!(pane.chunk_intervals.len(), 2);
+    }
+
+    #[test]
+    fn test_logs_pane_clear_logs() {
+        let mut pane = LogsPane::new();
+        pane.add_log(LogLevel::Error, "error");
+        pane.add_log(LogLevel::Info, "info");
+        pane.clear_logs();
+        assert!(pane.logs.is_empty());
+        assert!(pane.errors.is_empty());
+    }
+
+    #[test]
+    fn test_logs_pane_handle_tabs_key_left() {
+        let mut pane = LogsPane::new();
+        pane.selected_tab = 2;
+        pane.focused_field = FocusedField::Tabs;
+        assert!(pane.handle_key(KeyCode::Left, KeyModifiers::NONE));
+        assert_eq!(pane.selected_tab, 1);
+    }
+
+    #[test]
+    fn test_logs_pane_handle_tabs_key_right() {
+        let mut pane = LogsPane::new();
+        pane.focused_field = FocusedField::Tabs;
+        assert!(pane.handle_key(KeyCode::Right, KeyModifiers::NONE));
+        assert_eq!(pane.selected_tab, 1);
+    }
+
+    #[test]
+    fn test_logs_pane_handle_tabs_key_enter() {
+        let mut pane = LogsPane::new();
+        pane.focused_field = FocusedField::Tabs;
+        assert!(pane.handle_key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(pane.focused_field, FocusedField::TabContent);
+    }
+
+    #[test]
+    fn test_logs_pane_handle_logs_key_up() {
+        let mut pane = LogsPane::new();
+        pane.add_log(LogLevel::Info, "msg1");
+        pane.add_log(LogLevel::Info, "msg2");
+        pane.selected_log = 1;
+        assert!(pane.handle_key(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(pane.selected_log, 0);
+    }
+
+    #[test]
+    fn test_logs_pane_handle_logs_key_down() {
+        let mut pane = LogsPane::new();
+        pane.add_log(LogLevel::Info, "msg1");
+        pane.add_log(LogLevel::Info, "msg2");
+        assert!(pane.handle_key(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(pane.selected_log, 1);
+    }
+
+    #[test]
+    fn test_logs_pane_handle_errors_key_up() {
+        let mut pane = LogsPane::new();
+        pane.add_log(LogLevel::Error, "err1");
+        pane.add_log(LogLevel::Error, "err2");
+        pane.selected_error = 1;
+        pane.selected_tab = LogsTab::all().iter().position(|&t| t == LogsTab::Errors).unwrap();
+        assert!(pane.handle_key(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(pane.selected_error, 0);
+    }
+
+    #[test]
+    fn test_format_bytes_b() {
+        assert_eq!(format_bytes(512), "512 B");
+    }
+
+    #[test]
+    fn test_format_bytes_kb() {
+        assert_eq!(format_bytes(2048), "2.00 KB");
+    }
+
+    #[test]
+    fn test_format_bytes_mb() {
+        assert_eq!(format_bytes(1048576), "1.00 MB");
+    }
+
+    #[test]
+    fn test_format_bytes_gb() {
+        assert_eq!(format_bytes(1073741824), "1.00 GB");
+    }
+
+    #[test]
+    fn test_log_entry_timestamp_format() {
+        let entry = LogEntry::new(LogLevel::Info, "test");
+        let ts = entry.format_timestamp();
+        assert!(ts.contains(':'));
+    }
+
+    #[test]
+    fn test_logs_pane_with_max_logs() {
+        let pane = LogsPane::new().with_max_logs(500);
+        assert_eq!(pane.max_logs, 500);
+    }
+}
