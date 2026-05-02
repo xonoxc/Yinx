@@ -521,6 +521,198 @@ impl StreamHighlights {
     }
 }
 
+// ==================== 10: Time-travel + Replay ====================
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnapshotKind {
+    ChunkBoundary,
+    Ttfb,
+    Error,
+    LastChunk,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimelineSnapshot {
+    pub kind: SnapshotKind,
+    pub offset: u64,
+    pub timestamp: DateTime<Utc>,
+    body: Vec<u8>,
+}
+
+impl TimelineSnapshot {
+    pub fn new(body: impl Into<Vec<u8>>, offset: u64, timestamp: DateTime<Utc>) -> Self {
+        Self {
+            kind: SnapshotKind::ChunkBoundary,
+            offset,
+            timestamp,
+            body: body.into(),
+        }
+    }
+
+    pub fn from_text(text: impl AsRef<str>) -> Self {
+        Self::new(text.as_ref().as_bytes().to_vec(), 0, Utc::now())
+    }
+
+    pub fn with_kind(mut self, kind: SnapshotKind) -> Self {
+        self.kind = kind;
+        self
+    }
+
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
+
+    pub fn body_text(&self) -> Option<&str> {
+        std::str::from_utf8(&self.body).ok()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TimelineDiff {
+    pub removed_text: String,
+    pub added_text: String,
+}
+
+impl TimelineDiff {
+    pub fn render(&self) -> String {
+        let mut lines = Vec::new();
+        if !self.removed_text.is_empty() {
+            lines.push(format!("- {}", self.removed_text));
+        }
+        if !self.added_text.is_empty() {
+            lines.push(format!("+ {}", self.added_text));
+        }
+        if lines.is_empty() {
+            "No changes".to_string()
+        } else {
+            lines.join("\n")
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimelineJumpTarget {
+    Ttfb,
+    FirstError,
+    LastChunk,
+}
+
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TimelineState {
+    snapshots: Vec<TimelineSnapshot>,
+    current_index: Option<usize>,
+    assembled_body: Vec<u8>,
+}
+
+impl TimelineState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.snapshots.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.snapshots.is_empty()
+    }
+
+    pub fn current_index(&self) -> Option<usize> {
+        self.current_index
+    }
+
+    pub fn snapshot(&self, index: usize) -> Option<&TimelineSnapshot> {
+        self.snapshots.get(index)
+    }
+
+    pub fn current_snapshot(&self) -> Option<&TimelineSnapshot> {
+        self.current_index.and_then(|index| self.snapshot(index))
+    }
+
+    pub fn push_snapshot(&mut self, snapshot: TimelineSnapshot) {
+        self.assembled_body = snapshot.body().to_vec();
+        self.snapshots.push(snapshot);
+        self.current_index = Some(self.snapshots.len().saturating_sub(1));
+    }
+
+    pub fn capture_chunk(&mut self, chunk: &Chunk) {
+        self.assembled_body.extend_from_slice(&chunk.data);
+
+        let kind = if self.snapshots.is_empty() {
+            SnapshotKind::Ttfb
+        } else if chunk.is_final {
+            SnapshotKind::LastChunk
+        } else {
+            SnapshotKind::ChunkBoundary
+        };
+
+        let snapshot = TimelineSnapshot::new(
+            self.assembled_body.clone(),
+            chunk.offset + chunk.len() as u64,
+            chunk.timestamp,
+        )
+        .with_kind(kind);
+        self.push_snapshot(snapshot);
+    }
+
+    pub fn move_prev(&mut self) -> bool {
+        match self.current_index {
+            Some(index) if index > 0 => {
+                self.current_index = Some(index - 1);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn move_next(&mut self) -> bool {
+        match self.current_index {
+            Some(index) if index + 1 < self.snapshots.len() => {
+                self.current_index = Some(index + 1);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    pub fn diff(&self, from: usize, to: usize) -> Option<TimelineDiff> {
+        let before = self.snapshot(from)?.body_text()?;
+        let after = self.snapshot(to)?.body_text()?;
+        let common_prefix = before
+            .bytes()
+            .zip(after.bytes())
+            .take_while(|(left, right)| left == right)
+            .count();
+
+        Some(TimelineDiff {
+            removed_text: before[common_prefix..].to_string(),
+            added_text: after[common_prefix..].to_string(),
+        })
+    }
+
+    pub fn jump_to(&mut self, target: TimelineJumpTarget) -> Option<usize> {
+        let index = match target {
+            TimelineJumpTarget::Ttfb => self
+                .snapshots
+                .iter()
+                .position(|snapshot| snapshot.kind == SnapshotKind::Ttfb)
+                .or_else(|| (!self.snapshots.is_empty()).then_some(0)),
+            TimelineJumpTarget::FirstError => self
+                .snapshots
+                .iter()
+                .position(|snapshot| snapshot.kind == SnapshotKind::Error),
+            TimelineJumpTarget::LastChunk => self
+                .snapshots
+                .iter()
+                .rposition(|snapshot| snapshot.kind == SnapshotKind::LastChunk)
+                .or_else(|| self.snapshots.len().checked_sub(1)),
+        }?;
+
+        self.current_index = Some(index);
+        Some(index)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1083,5 +1275,84 @@ mod tests {
     fn test_highlight_marker_position() {
         let marker = HighlightMarker::new(999);
         assert_eq!(marker.position, 999);
+    }
+
+    // ==================== 10.1-10.7: Time-travel + Replay ====================
+
+    #[test]
+    fn test_timeline_state_defaults() {
+        let timeline = TimelineState::new();
+        assert!(timeline.is_empty());
+        assert_eq!(timeline.len(), 0);
+        assert_eq!(timeline.current_index(), None);
+        assert!(timeline.current_snapshot().is_none());
+    }
+
+    #[test]
+    fn test_timeline_captures_snapshot_at_each_chunk_boundary() {
+        let mut timeline = TimelineState::new();
+        let first_ts = Utc.timestamp_opt(1_700_000_000, 0).unwrap();
+        let second_ts = Utc.timestamp_opt(1_700_000_001, 0).unwrap();
+
+        timeline.capture_chunk(&Chunk::new("hel", 0).with_timestamp(first_ts));
+        timeline.capture_chunk(&Chunk::new("lo", 3).with_timestamp(second_ts).final_chunk());
+
+        assert_eq!(timeline.len(), 2);
+        assert_eq!(timeline.current_index(), Some(1));
+        assert_eq!(timeline.snapshot(0).unwrap().body_text().unwrap(), "hel");
+        assert_eq!(timeline.snapshot(1).unwrap().body_text().unwrap(), "hello");
+        assert_eq!(timeline.snapshot(0).unwrap().kind, SnapshotKind::Ttfb);
+        assert_eq!(timeline.snapshot(1).unwrap().kind, SnapshotKind::LastChunk);
+    }
+
+    #[test]
+    fn test_timeline_scrubbing_moves_within_bounds() {
+        let mut timeline = TimelineState::new();
+        timeline.push_snapshot(TimelineSnapshot::from_text("one"));
+        timeline.push_snapshot(TimelineSnapshot::from_text("two"));
+        timeline.push_snapshot(TimelineSnapshot::from_text("three"));
+
+        assert_eq!(timeline.current_index(), Some(2));
+        assert!(timeline.move_prev());
+        assert_eq!(timeline.current_index(), Some(1));
+        assert!(timeline.move_prev());
+        assert_eq!(timeline.current_index(), Some(0));
+        assert!(!timeline.move_prev());
+        assert_eq!(timeline.current_index(), Some(0));
+        assert!(timeline.move_next());
+        assert_eq!(timeline.current_index(), Some(1));
+        assert!(timeline.move_next());
+        assert_eq!(timeline.current_index(), Some(2));
+        assert!(!timeline.move_next());
+        assert_eq!(timeline.current_index(), Some(2));
+    }
+
+    #[test]
+    fn test_timeline_diff_between_two_snapshots() {
+        let mut timeline = TimelineState::new();
+        timeline.push_snapshot(TimelineSnapshot::from_text("hello"));
+        timeline.push_snapshot(TimelineSnapshot::from_text("hello world"));
+
+        let diff = timeline.diff(0, 1).unwrap();
+        assert_eq!(diff.removed_text, "");
+        assert_eq!(diff.added_text, " world");
+        assert_eq!(diff.render(), "+  world");
+    }
+
+    #[test]
+    fn test_timeline_jump_to_key_moments() {
+        let mut timeline = TimelineState::new();
+        timeline.push_snapshot(TimelineSnapshot::from_text("warmup").with_kind(SnapshotKind::Ttfb));
+        timeline.push_snapshot(TimelineSnapshot::from_text("steady"));
+        timeline.push_snapshot(TimelineSnapshot::from_text("oops").with_kind(SnapshotKind::Error));
+        timeline
+            .push_snapshot(TimelineSnapshot::from_text("done").with_kind(SnapshotKind::LastChunk));
+
+        assert_eq!(timeline.jump_to(TimelineJumpTarget::Ttfb), Some(0));
+        assert_eq!(timeline.current_index(), Some(0));
+        assert_eq!(timeline.jump_to(TimelineJumpTarget::FirstError), Some(2));
+        assert_eq!(timeline.current_index(), Some(2));
+        assert_eq!(timeline.jump_to(TimelineJumpTarget::LastChunk), Some(3));
+        assert_eq!(timeline.current_index(), Some(3));
     }
 }

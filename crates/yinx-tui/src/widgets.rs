@@ -1,3 +1,4 @@
+use crossterm::event::KeyCode;
 use ratatui::{
     layout::{Alignment, Constraint, Rect},
     style::{Modifier, Style},
@@ -10,6 +11,7 @@ use ratatui::{
 };
 
 use yinx_core::state::NetworkState;
+use yinx_http::streaming::{SnapshotKind, TimelineState};
 
 use crate::theme::Theme;
 
@@ -447,6 +449,113 @@ impl<'a> StatusBar<'a> {
     }
 }
 
+pub struct TimelineWidget {
+    timeline: TimelineState,
+    title: String,
+}
+
+impl TimelineWidget {
+    pub fn new(timeline: TimelineState) -> Self {
+        Self {
+            timeline,
+            title: "Timeline".to_string(),
+        }
+    }
+
+    pub fn timeline(&self) -> &TimelineState {
+        &self.timeline
+    }
+
+    pub fn handle_key(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::Left => self.timeline.move_prev(),
+            KeyCode::Right => self.timeline.move_next(),
+            _ => false,
+        }
+    }
+
+    pub fn progress_line(&self, width: u16) -> String {
+        let width = width.max(3) as usize;
+        let bar_width = width.saturating_sub(2);
+
+        if self.timeline.is_empty() {
+            return format!("[{}] 0/0", "-".repeat(bar_width));
+        }
+
+        let mut chars = vec!['-'; bar_width];
+        let len = self.timeline.len();
+        let current = self.timeline.current_index().unwrap_or(0);
+        let current_pos = if len <= 1 {
+            0
+        } else {
+            current * bar_width.saturating_sub(1) / (len - 1)
+        };
+
+        for ch in chars.iter_mut().take(current_pos) {
+            *ch = '=';
+        }
+        if current_pos < chars.len() {
+            chars[current_pos] = '|';
+        }
+
+        format!(
+            "[{}] {}/{}",
+            chars.into_iter().collect::<String>(),
+            current + 1,
+            len
+        )
+    }
+
+    pub fn marker_line(&self, width: u16) -> String {
+        let width = width.max(1) as usize;
+        let mut chars = vec![' '; width];
+        let len = self.timeline.len();
+
+        if len == 0 {
+            return chars.into_iter().collect();
+        }
+
+        for index in 0..len {
+            if let Some(snapshot) = self.timeline.snapshot(index) {
+                let pos = if len <= 1 {
+                    0
+                } else {
+                    index * width.saturating_sub(1) / (len - 1)
+                };
+
+                chars[pos] = match snapshot.kind {
+                    SnapshotKind::Ttfb => 'T',
+                    SnapshotKind::Error => 'E',
+                    SnapshotKind::LastChunk => 'F',
+                    SnapshotKind::ChunkBoundary => '.',
+                };
+            }
+        }
+
+        chars.into_iter().collect()
+    }
+
+    pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let lines = vec![
+            Line::from(self.progress_line(area.width.saturating_sub(2))),
+            Line::from(self.marker_line(area.width.saturating_sub(2))),
+        ];
+
+        let paragraph = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(self.title.as_str())
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color())),
+            )
+            .style(Style::default().fg(theme.foreground.as_color()))
+            .wrap(Wrap { trim: true });
+
+        frame.render_widget(paragraph, area);
+    }
+}
+
 pub struct Modal<'a> {
     title: &'a str,
     content: Vec<Line<'a>>,
@@ -550,6 +659,7 @@ mod tests {
     use super::*;
 
     use crate::theme::Theme;
+    use yinx_http::streaming::{SnapshotKind, TimelineSnapshot, TimelineState};
 
     #[test]
     fn test_panel_new() {
@@ -746,5 +856,39 @@ mod tests {
         let _ = theme.border.color.as_color();
         let _ = theme.highlight.selected_bg.as_color();
         let _ = theme.semantic.success.as_color();
+    }
+
+    fn sample_timeline() -> TimelineState {
+        let mut timeline = TimelineState::new();
+        timeline.push_snapshot(TimelineSnapshot::from_text("hello").with_kind(SnapshotKind::Ttfb));
+        timeline.push_snapshot(TimelineSnapshot::from_text("hello!"));
+        timeline.push_snapshot(
+            TimelineSnapshot::from_text("hello! done").with_kind(SnapshotKind::LastChunk),
+        );
+        timeline
+    }
+
+    #[test]
+    fn test_timeline_widget_handle_key_left_right() {
+        let mut widget = TimelineWidget::new(sample_timeline());
+        assert_eq!(widget.timeline().current_index(), Some(2));
+
+        assert!(widget.handle_key(crossterm::event::KeyCode::Left));
+        assert_eq!(widget.timeline().current_index(), Some(1));
+        assert!(widget.handle_key(crossterm::event::KeyCode::Right));
+        assert_eq!(widget.timeline().current_index(), Some(2));
+    }
+
+    #[test]
+    fn test_timeline_widget_render_lines_include_progress_and_markers() {
+        let widget = TimelineWidget::new(sample_timeline());
+        let progress = widget.progress_line(12);
+        let markers = widget.marker_line(12);
+
+        assert!(progress.contains('['));
+        assert!(progress.contains('|'));
+        assert!(progress.contains("3/3"));
+        assert!(markers.contains('T'));
+        assert!(markers.contains('F'));
     }
 }

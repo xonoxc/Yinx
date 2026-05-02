@@ -256,6 +256,10 @@ impl HistoryStore {
         }
     }
 
+    pub fn replay_entry(&self, entry_id: &str) -> Result<Option<HistoryEntry>> {
+        self.get_by_id(entry_id)
+    }
+
     pub fn clear(&mut self) -> Result<()> {
         File::create(&self.path)?;
         Ok(())
@@ -396,10 +400,18 @@ mod tests {
         store.append(&entry).unwrap();
         let request = store.replay_request(&id).unwrap();
         assert!(request.is_some());
-        assert_eq!(
-            request.unwrap().url.as_str(),
-            "https://api.example.com/users"
-        );
+        assert_eq!(request.unwrap(), entry.request);
+    }
+
+    #[test]
+    fn test_replay_entry_exact_match() {
+        let (mut store, _dir) = setup_store();
+        let entry = create_test_entry();
+        let id = entry.id.clone();
+        store.append(&entry).unwrap();
+
+        let replayed = store.replay_entry(&id).unwrap();
+        assert_eq!(replayed, Some(entry));
     }
 
     #[test]
@@ -417,12 +429,13 @@ mod tests {
     #[test]
     fn test_compact_by_age() {
         let (mut store, _dir) = setup_store();
-        let old_entry = create_test_entry();
-        store.append(&old_entry).unwrap();
         let old_time = Utc::now() - Duration::days(2);
+        let mut old_entry = create_test_entry();
+        old_entry.timestamp = old_time;
+        store.append(&old_entry).unwrap();
         let before = Utc::now() - Duration::days(1);
         let removed = store.compact_by_age(before).unwrap();
-        assert!(removed > 0 || true);
+        assert_eq!(removed, 1);
     }
 
     #[test]
