@@ -8,6 +8,7 @@ yinx-core = { path = "../yinx-core" }
 yinx-http = { path = "../yinx-http" }
 yinx-workflow = { path = "../yinx-workflow" }
 yinx-import = { path = "../yinx-import" }
+yinx-tui = { path = "../yinx-tui" }
 clap = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

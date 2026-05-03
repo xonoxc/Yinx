@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -11,7 +12,9 @@ use ratatui::{
 };
 use serde::{Deserialize, Serialize};
 
-use yinx_core::request::{Header, Headers, Method, RequestBody, RequestUrl};
+use yinx_core::request::{
+    Header, Headers, Method, Request, RequestBody, RequestBuilder, RequestError, RequestUrl,
+};
 
 use crate::editor::{EditorError, EditorFormat};
 use crate::input::InputBuffer;
@@ -310,12 +313,102 @@ impl RequestPane {
         }
     }
 
+    pub fn to_request(&self, timeout_secs: u64) -> Result<Request, RequestError> {
+        let url = self.url_with_query_params();
+        let body = self.effective_body();
+        let mut headers = self.headers();
+
+        match self.auth_type {
+            AuthType::None => {}
+            AuthType::Basic => {
+                let username = self.auth_username.as_str().trim();
+                let password = self.auth_password.as_str().trim();
+                if !username.is_empty() || !password.is_empty() {
+                    let encoded = BASE64.encode(format!("{username}:{password}"));
+                    headers.set("Authorization", &format!("Basic {encoded}"))?;
+                }
+            }
+            AuthType::Bearer => {
+                let token = self.auth_token.as_str().trim();
+                if !token.is_empty() {
+                    headers.set("Authorization", &format!("Bearer {token}"))?;
+                }
+            }
+            AuthType::ApiKey => {
+                let name = self.auth_key_name.as_str().trim();
+                let value = self.auth_key_value.as_str().trim();
+                if !name.is_empty() {
+                    headers.set(name, value)?;
+                }
+            }
+        }
+
+        if !body.is_empty() && !headers.contains("content-type") {
+            if let Some(content_type) = body.content_type() {
+                headers.set("Content-Type", content_type)?;
+            }
+        }
+
+        RequestBuilder::new()
+            .method(self.method)
+            .url(url)
+            .headers(headers)
+            .body(body)
+            .timeout_secs(timeout_secs)
+            .build()
+    }
+
     pub fn set_focused_field(&mut self, field: FocusedField) {
         self.focused_field = field;
     }
 
     pub fn focused_field(&self) -> FocusedField {
         self.focused_field
+    }
+
+    fn url_with_query_params(&self) -> String {
+        let url = self.url();
+        if url.trim().is_empty() || self.body_type == BodyType::Form {
+            return url;
+        }
+
+        let params: Vec<(String, String)> = self
+            .params
+            .iter()
+            .filter_map(|(key, value)| {
+                let key = key.as_str().trim();
+                if key.is_empty() {
+                    None
+                } else {
+                    Some((key.to_string(), value.as_str().to_string()))
+                }
+            })
+            .collect();
+
+        if params.is_empty() {
+            return url;
+        }
+
+        match url::Url::parse(&url) {
+            Ok(mut parsed) => {
+                {
+                    let mut query = parsed.query_pairs_mut();
+                    for (key, value) in params {
+                        query.append_pair(&key, &value);
+                    }
+                }
+                parsed.to_string()
+            }
+            Err(_) => url,
+        }
+    }
+
+    fn effective_body(&self) -> RequestBody {
+        match self.body() {
+            RequestBody::Raw(content) if content.is_empty() => RequestBody::None,
+            RequestBody::Form(fields) if fields.is_empty() => RequestBody::None,
+            other => other,
+        }
     }
 
     pub fn editor_spec_for_focused_field(&self) -> Result<RequestPaneEditSpec, EditorError> {
@@ -2298,5 +2391,32 @@ mod tests {
     fn test_layout_renders() {
         let pane = RequestPane::new();
         assert_eq!(pane.focused_field(), FocusedField::Url);
+    }
+
+    #[test]
+    fn test_to_request_adds_query_params_and_auth() {
+        let pane = RequestPane::new()
+            .with_url("https://example.com/api")
+            .with_method(Method::Get);
+        let mut pane = pane;
+        pane.auth_type = AuthType::Bearer;
+        pane.auth_token = InputBuffer::with_content("token123");
+        pane.params[0].0 = InputBuffer::with_content("page");
+        pane.params[0].1 = InputBuffer::with_content("1");
+
+        let request = pane.to_request(15).unwrap();
+
+        assert_eq!(request.url.as_str(), "https://example.com/api?page=1");
+        assert_eq!(request.headers.get("Authorization"), Some("Bearer token123"));
+        assert_eq!(request.timeout_secs, 15);
+    }
+
+    #[test]
+    fn test_to_request_omits_empty_raw_body() {
+        let pane = RequestPane::new().with_url("https://example.com");
+        let request = pane.to_request(30).unwrap();
+
+        assert_eq!(request.body, RequestBody::None);
+        assert_eq!(request.headers.get("Content-Type"), None);
     }
 }

@@ -110,7 +110,10 @@ pub async fn run() {
 
     let cmd = match cli.command {
         None => {
-            println!("yinx TUI mode (not yet implemented)");
+            if let Err(e) = yinx_tui::run_tui().await {
+                eprintln!("Error: {}", e);
+                process::exit(1);
+            }
             return;
         }
         Some(cmd) => cmd,

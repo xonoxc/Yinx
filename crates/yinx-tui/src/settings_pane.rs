@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -7,7 +6,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
-use yinx_core::config::{self, Config, ConfigError, discover_config};
+use yinx_core::config::{discover_config, Config};
 use yinx_core::events::AppEvent;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -256,8 +255,6 @@ impl SettingsPane {
         f.render_widget(Clear, area);
         f.render_widget(block, area);
 
-        let items: Vec<ListItem<'_>> = self.settings_items();
-
         let layout = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![Constraint::Min(0), Constraint::Length(1)])
@@ -347,7 +344,7 @@ mod tests {
     use yinx_core::config::Config;
 
     fn create_test_pane() -> SettingsPane {
-        let mut pane = SettingsPane {
+        SettingsPane {
             config: Config::default_config(),
             config_path: None,
             mode: SettingsMode::Viewing,
@@ -355,8 +352,7 @@ mod tests {
             edit_buffer: String::new(),
             message: None,
             is_open: false,
-        };
-        pane
+        }
     }
 
     #[test]

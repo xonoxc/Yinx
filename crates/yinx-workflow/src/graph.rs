@@ -381,7 +381,7 @@ impl Workflow {
     fn validate_condition_variables(
         &self,
         condition: &str,
-        edge: &WorkflowEdge,
+        _edge: &WorkflowEdge,
         result: &mut ValidationResult,
     ) {
         // Check for has_var() references

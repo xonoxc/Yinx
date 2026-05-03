@@ -159,7 +159,44 @@ fn shell_escape(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        ENV_LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    fn with_editor_env<T>(visual: Option<&str>, editor: Option<&str>, f: impl FnOnce() -> T) -> T {
+        let _guard = env_lock().lock().unwrap();
+        let original_visual = env::var("VISUAL").ok();
+        let original_editor = env::var("EDITOR").ok();
+
+        unsafe {
+            match visual {
+                Some(value) => env::set_var("VISUAL", value),
+                None => env::remove_var("VISUAL"),
+            }
+            match editor {
+                Some(value) => env::set_var("EDITOR", value),
+                None => env::remove_var("EDITOR"),
+            }
+        }
+
+        let result = f();
+
+        unsafe {
+            match original_visual {
+                Some(value) => env::set_var("VISUAL", value),
+                None => env::remove_var("VISUAL"),
+            }
+            match original_editor {
+                Some(value) => env::set_var("EDITOR", value),
+                None => env::remove_var("EDITOR"),
+            }
+        }
+
+        result
+    }
 
     struct RecordingTerminal {
         events: Arc<Mutex<Vec<&'static str>>>,
@@ -225,24 +262,16 @@ mod tests {
 
     #[test]
     fn test_detect_editor_prefers_visual() {
-        unsafe {
-            env::set_var("VISUAL", "nano");
-            env::set_var("EDITOR", "vim");
-        }
-        assert_eq!(detect_editor(), "nano");
-        unsafe {
-            env::remove_var("VISUAL");
-            env::remove_var("EDITOR");
-        }
+        with_editor_env(Some("nano"), Some("vim"), || {
+            assert_eq!(detect_editor(), "nano");
+        });
     }
 
     #[test]
     fn test_detect_editor_falls_back_to_vim() {
-        unsafe {
-            env::remove_var("VISUAL");
-            env::remove_var("EDITOR");
-        }
-        assert_eq!(detect_editor(), "vim");
+        with_editor_env(None, None, || {
+            assert_eq!(detect_editor(), "vim");
+        });
     }
 
     #[test]

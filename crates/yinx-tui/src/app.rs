@@ -5,16 +5,31 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::{
-    event::{self, Event},
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::backend::CrosstermBackend;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Terminal as RatatuiTerminal;
 
 use crate::editor::{self, EditorError, EditorFormat, SystemEditorRunner, TerminalSession};
+use crate::layout::Layout;
+use crate::logs_pane::{LogLevel, LogsPane};
+use crate::request_pane::RequestPane;
+use crate::settings_pane::SettingsPane;
+use crate::theme::Theme;
+use crate::widgets::StatusBar;
+use crate::workflow_pane::WorkflowPane;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
-#[allow(unused_imports)]
-use yinx_core::state::{ActivePane, InputMode, UiState};
+use yinx_core::response::{Response, ResponseBody};
+use yinx_core::state::{ActivePane, NetworkState};
+use yinx_core::timing::{RequestMetrics, Timing};
+use yinx_http::client::HttpClient;
+#[cfg(test)]
+use yinx_core::state::{InputMode, UiState};
 
 use crate::input::InputHandler;
 
@@ -32,6 +47,34 @@ pub enum AppError {
     Render(String),
     #[error("Panic: {0}")]
     Panic(String),
+}
+
+pub async fn run_tui() -> Result<(), AppError> {
+    let mut app = App::init()?;
+    let terminal_size = app
+        .terminal()
+        .size()
+        .map_err(|e| AppError::Render(e.to_string()))?;
+    let mut shell = TuiShell::new(terminal_size.width, terminal_size.height);
+
+    loop {
+        app.terminal()
+            .draw(|frame| shell.render(frame))
+            .map_err(|e| AppError::Render(e.to_string()))?;
+
+        if shell.should_quit() {
+            break;
+        }
+
+        if event::poll(Duration::from_millis(50))
+            .map_err(|e| AppError::EventLoop(e.to_string()))?
+        {
+            let event = event::read().map_err(|e| AppError::EventLoop(e.to_string()))?;
+            shell.handle_event(event).await?;
+        }
+    }
+
+    Ok(())
 }
 
 pub struct TerminalGuard {
@@ -93,6 +136,346 @@ impl Drop for TerminalGuard {
             let _ = terminal::disable_raw_mode();
             let _ = Self::show_cursor();
         }
+    }
+}
+
+struct TuiShell {
+    theme: Theme,
+    layout: Layout,
+    request_pane: RequestPane,
+    logs_pane: LogsPane,
+    workflow_pane: WorkflowPane,
+    settings_pane: SettingsPane,
+    active_pane: ActivePane,
+    network_state: NetworkState,
+    latest_response: Option<Response>,
+    latest_error: Option<String>,
+    should_quit: bool,
+}
+
+impl TuiShell {
+    fn new(width: u16, height: u16) -> Self {
+        let mut layout = Layout::new();
+        layout.update_terminal_size(width, height);
+        if height < 30 {
+            layout.toggle_split_direction();
+        }
+
+        let mut logs_pane = LogsPane::new();
+        logs_pane.add_log(
+            LogLevel::Info,
+            "Welcome to Yinx. Edit the request, then press F5 to send it.",
+        );
+        logs_pane.add_log(
+            LogLevel::Info,
+            "F1-F4 switch panes, F6 opens settings, F7 toggles layout, Ctrl+C quits.",
+        );
+
+        Self {
+            theme: Theme::dark(),
+            layout,
+            request_pane: RequestPane::new().with_url("https://example.com"),
+            logs_pane,
+            workflow_pane: WorkflowPane::new(),
+            settings_pane: SettingsPane::new(),
+            active_pane: ActivePane::Request,
+            network_state: NetworkState::Idle,
+            latest_response: None,
+            latest_error: None,
+            should_quit: false,
+        }
+    }
+
+    fn should_quit(&self) -> bool {
+        self.should_quit
+    }
+
+    async fn handle_event(&mut self, event: Event) -> Result<(), AppError> {
+        match event {
+            Event::Key(key_event) => self.handle_key(key_event).await,
+            Event::Resize(width, height) => {
+                self.layout.update_terminal_size(width, height);
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    async fn handle_key(&mut self, key_event: KeyEvent) -> Result<(), AppError> {
+        if key_event.modifiers.contains(KeyModifiers::CONTROL)
+            && key_event.code == KeyCode::Char('c')
+        {
+            self.should_quit = true;
+            return Ok(());
+        }
+
+        if self.settings_pane.is_open() {
+            match key_event.code {
+                KeyCode::F(6) => {
+                    self.settings_pane.close();
+                    return Ok(());
+                }
+                _ => {
+                    if let Some(event) = key_to_app_event(key_event) {
+                        let _ = self.settings_pane.handle_event(&event);
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
+        match key_event.code {
+            KeyCode::F(1) => self.active_pane = ActivePane::Request,
+            KeyCode::F(2) => self.active_pane = ActivePane::Response,
+            KeyCode::F(3) => self.active_pane = ActivePane::Workflow,
+            KeyCode::F(4) => self.active_pane = ActivePane::Logs,
+            KeyCode::F(5) => self.execute_request().await?,
+            KeyCode::F(6) => self.settings_pane.open(),
+            KeyCode::F(7) => self.layout.toggle_split_direction(),
+            KeyCode::F(8) => self.layout.resize_request_pane(-4),
+            KeyCode::F(9) => self.layout.resize_request_pane(4),
+            _ => self.forward_key_to_active_pane(key_event),
+        }
+
+        Ok(())
+    }
+
+    fn forward_key_to_active_pane(&mut self, key_event: KeyEvent) {
+        match self.active_pane {
+            ActivePane::Request => {
+                let _ = self
+                    .request_pane
+                    .handle_key(key_event.code, key_event.modifiers);
+            }
+            ActivePane::Workflow => {
+                let _ = self
+                    .workflow_pane
+                    .handle_key(key_event.code, key_event.modifiers);
+            }
+            ActivePane::Logs => {
+                let _ = self.logs_pane.handle_key(key_event.code, key_event.modifiers);
+            }
+            ActivePane::Response => {}
+        }
+    }
+
+    async fn execute_request(&mut self) -> Result<(), AppError> {
+        let timeout_secs = self.settings_pane.config.defaults.default_timeout_secs;
+        let follow_redirects = self.settings_pane.config.defaults.follow_redirects;
+        let verify_tls = self.settings_pane.config.defaults.verify_tls;
+
+        let request = self
+            .request_pane
+            .to_request(timeout_secs)
+            .map_err(|e| AppError::Render(e.to_string()))?;
+
+        self.logs_pane.set_current_request(request.clone());
+        self.logs_pane.add_log(
+            LogLevel::Info,
+            format!("Sending {} {}", request.method, request.url.as_str()),
+        );
+        self.network_state = NetworkState::Loading;
+        self.latest_error = None;
+
+        let started_at = std::time::Instant::now();
+        let client = HttpClient::new()
+            .map_err(|e| AppError::Render(e.to_string()))?
+            .with_timeout(timeout_secs)
+            .with_follow_redirects(follow_redirects)
+            .with_tls_verify(verify_tls);
+
+        match client.send_request(request).await {
+            Ok(mut response) => {
+                let elapsed_ms = started_at.elapsed().as_millis() as u64;
+                response.timing_ms = elapsed_ms;
+
+                let metrics = RequestMetrics::new()
+                    .with_timing(Timing::new().with_total(elapsed_ms))
+                    .with_status_code(response.status.code())
+                    .with_body_size(response.body_size());
+                self.logs_pane.set_metrics(metrics);
+
+                if response.is_error() {
+                    self.logs_pane.add_log(
+                        LogLevel::Warning,
+                        format!("Request completed with {}", response.status),
+                    );
+                } else {
+                    self.logs_pane.add_log(
+                        LogLevel::Info,
+                        format!(
+                            "Request completed with {} in {}ms",
+                            response.status, elapsed_ms
+                        ),
+                    );
+                }
+
+                self.latest_response = Some(response);
+                self.network_state = NetworkState::Idle;
+                self.active_pane = ActivePane::Response;
+            }
+            Err(error) => {
+                let message = error.to_string();
+                self.logs_pane.add_log(LogLevel::Error, message.clone());
+                self.latest_error = Some(message.clone());
+                self.network_state = NetworkState::Error(message);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
+        let area = frame.area();
+        let background = Block::default().style(Style::default().bg(self.theme.background.as_color()));
+        frame.render_widget(background, area);
+
+        let pane_rects = self.layout.calculate();
+
+        self.request_pane.render(
+            frame,
+            pane_rects.request,
+            &self.theme,
+            self.active_pane == ActivePane::Request,
+        );
+        self.render_response_pane(
+            frame,
+            pane_rects.response,
+            self.active_pane == ActivePane::Response,
+        );
+        self.workflow_pane.render(
+            frame,
+            pane_rects.workflow,
+            &self.theme,
+            self.active_pane == ActivePane::Workflow,
+        );
+        self.logs_pane.render(
+            frame,
+            pane_rects.logs,
+            &self.theme,
+            self.active_pane == ActivePane::Logs,
+        );
+
+        let status = StatusBar::new("TUI")
+            .with_network_state(&self.network_state)
+            .with_cursor(0, 0)
+            .with_hints(vec![
+                ("F1-F4", "Panes"),
+                ("F5", "Run"),
+                ("F6", "Settings"),
+                ("F7", "Layout"),
+                ("F8/F9", "Resize"),
+                ("Ctrl+C", "Quit"),
+            ]);
+        status.render(frame, pane_rects.status_bar, &self.theme);
+
+        if self.settings_pane.is_open() {
+            self.settings_pane.render(frame, centered_rect(area, 70, 70));
+        }
+    }
+
+    fn render_response_pane(
+        &self,
+        frame: &mut ratatui::Frame<'_>,
+        area: Rect,
+        is_active: bool,
+    ) {
+        let border_color = if is_active {
+            self.theme.border.active_color.as_color()
+        } else {
+            self.theme.border.color.as_color()
+        };
+
+        let block = Block::default()
+            .title("Response")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(self.theme.pane.background.as_color()));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let mut lines = Vec::new();
+
+        for warning in self.layout.validate() {
+            lines.push(Line::from(Span::styled(
+                warning,
+                Style::default().fg(self.theme.semantic.warning.as_color()),
+            )));
+        }
+
+        if let Some(error) = &self.latest_error {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("Last error: {error}"),
+                Style::default().fg(self.theme.semantic.error.as_color()),
+            )));
+        }
+
+        if let Some(response) = &self.latest_response {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                format!("Status: {}", response.status),
+                Style::default().fg(if response.is_error() {
+                    self.theme.semantic.error.as_color()
+                } else {
+                    self.theme.semantic.success.as_color()
+                }),
+            )));
+            lines.push(Line::from(format!("Time: {} ms", response.timing_ms)));
+            lines.push(Line::from(format!("Body: {} bytes", response.body_size())));
+            if let Some(content_type) = response.content_type() {
+                lines.push(Line::from(format!("Content-Type: {content_type}")));
+            }
+            lines.push(Line::from(""));
+
+            for line in response_body_preview(response).lines().take(20) {
+                lines.push(Line::from(line.to_string()));
+            }
+        } else {
+            lines.push(Line::from("Press F5 to send the current request."));
+            lines.push(Line::from("The request pane is live: type directly into the URL, headers, body, auth, or params fields."));
+            lines.push(Line::from(""));
+            lines.push(Line::from(format!(
+                "Current request: {} {}",
+                self.request_pane.method(),
+                self.request_pane.url()
+            )));
+        }
+
+        let paragraph = Paragraph::new(lines)
+            .style(Style::default().fg(self.theme.foreground.as_color()))
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, inner);
+    }
+}
+
+fn key_to_app_event(key_event: KeyEvent) -> Option<AppEvent> {
+    let key = match key_event.code {
+        KeyCode::Char(c) => c.to_string(),
+        KeyCode::Enter => "Enter".to_string(),
+        KeyCode::Esc => "Esc".to_string(),
+        KeyCode::Backspace => "Backspace".to_string(),
+        _ => return None,
+    };
+    Some(AppEvent::KeyPressed(key))
+}
+
+fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
+    let width = area.width.saturating_mul(width_percent).saturating_div(100);
+    let height = area.height.saturating_mul(height_percent).saturating_div(100);
+    let x = area.x + area.width.saturating_sub(width) / 2;
+    let y = area.y + area.height.saturating_sub(height) / 2;
+    Rect::new(x, y, width.max(1), height.max(1))
+}
+
+fn response_body_preview(response: &Response) -> String {
+    match &response.body {
+        ResponseBody::Json(_) => response
+            .body
+            .pretty_json()
+            .unwrap_or_else(|| response.body.to_string()),
+        ResponseBody::Text(_) => response.body.as_text().unwrap_or_default(),
+        _ => response.body.to_string(),
     }
 }
 

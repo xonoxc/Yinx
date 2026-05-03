@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use yinx_core::request::{Method, Request, RequestBody, RequestUrl};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -90,7 +90,8 @@ pub struct OpenApiSchema {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenApiComponents {
     #[serde(default)]
-    pub securitySchemes: Option<HashMap<String, OpenApiSecurityScheme>>,
+    #[serde(rename = "securitySchemes")]
+    pub security_schemes: Option<HashMap<String, OpenApiSecurityScheme>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -126,17 +127,21 @@ pub struct OpenApiOAuthFlows {
     #[serde(default)]
     pub password: Option<OpenApiOAuthFlow>,
     #[serde(default)]
-    pub clientCredentials: Option<OpenApiOAuthFlow>,
+    #[serde(rename = "clientCredentials")]
+    pub client_credentials: Option<OpenApiOAuthFlow>,
     #[serde(default)]
-    pub authorizationCode: Option<OpenApiOAuthFlow>,
+    #[serde(rename = "authorizationCode")]
+    pub authorization_code: Option<OpenApiOAuthFlow>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OpenApiOAuthFlow {
     #[serde(default)]
-    pub authorizationUrl: String,
+    #[serde(rename = "authorizationUrl")]
+    pub authorization_url: String,
     #[serde(default)]
-    pub tokenUrl: String,
+    #[serde(rename = "tokenUrl")]
+    pub token_url: String,
     #[serde(default)]
     pub scopes: HashMap<String, String>,
 }
@@ -148,7 +153,8 @@ pub struct SwaggerSpec {
     pub info: OpenApiInfo,
     pub paths: HashMap<String, OpenApiPathItem>,
     #[serde(default)]
-    pub securityDefinitions: Option<HashMap<String, OpenApiSecurityScheme>>,
+    #[serde(rename = "securityDefinitions")]
+    pub security_definitions: Option<HashMap<String, OpenApiSecurityScheme>>,
     #[serde(default)]
     pub security: Option<Vec<HashMap<String, Vec<String>>>>,
 }
@@ -185,7 +191,7 @@ fn parse_openapi_30(spec: &str) -> Result<Vec<Request>, String> {
     let security_schemes = openapi
         .components
         .as_ref()
-        .and_then(|c| c.securitySchemes.as_ref().cloned());
+        .and_then(|c| c.security_schemes.as_ref().cloned());
 
     let global_security = openapi.security.clone();
     let mut requests = Vec::new();
@@ -210,7 +216,7 @@ fn parse_swagger_20(spec: &str) -> Result<Vec<Request>, String> {
         serde_yaml::from_str(spec).map_err(|e| e.to_string())?
     };
 
-    let security_schemes = swagger.securityDefinitions.as_ref().cloned();
+    let security_schemes = swagger.security_definitions.as_ref().cloned();
     let global_security = swagger.security.clone();
     let mut requests = Vec::new();
 
@@ -246,9 +252,6 @@ fn add_operation_requests(
 
     for (method, op_opt) in operations {
         if let Some(op) = op_opt {
-            eprintln!("DEBUG: Processing operation with method {:?}", method);
-            eprintln!("DEBUG: op = {:?}", op);
-            eprintln!("DEBUG: path = {}", path);
             // Keep the path as-is since it may contain path parameters like {id}
             let mut url = path.to_string();
 
@@ -300,17 +303,13 @@ fn add_operation_requests(
             }
 
             // Handle request body
-            eprintln!("DEBUG: op.request_body = {:?}", op.request_body);
             let body = if let Some(req_body) = &op.request_body {
-                eprintln!("DEBUG: request body = {:?}", req_body);
-                if let Some(json_content) = req_body.content.get("application/json") {
-                    eprintln!("DEBUG: Found application/json content");
-                    let result = headers.set("Content-Type", "application/json");
-                    eprintln!("DEBUG: Set Content-Type header result: {:?}", result);
-                    eprintln!("DEBUG: Headers after set: {:?}", headers);
+                if req_body.content.contains_key("application/json") {
+                    let _ = headers.set("Content-Type", "application/json");
                     RequestBody::Json(serde_json::json!({}))
-                } else if let Some(form_content) =
-                    req_body.content.get("application/x-www-form-urlencoded")
+                } else if req_body
+                    .content
+                    .contains_key("application/x-www-form-urlencoded")
                 {
                     let _ = headers.set("Content-Type", "application/x-www-form-urlencoded");
                     RequestBody::Form(vec![])
@@ -327,21 +326,17 @@ fn add_operation_requests(
             } else {
                 format!("https://example.com{}", url)
             };
-            eprintln!("DEBUG: url_to_parse = {}", url_to_parse);
             // For template URLs (containing {), don't validate with RequestUrl
             let req_url = if url_to_parse.contains('{') {
                 // Create RequestUrl with template
                 RequestUrl::new(&url_to_parse).unwrap_or_else(|_| {
-                    eprintln!("DEBUG: Failed to parse template URL: {}", url_to_parse);
                     RequestUrl::new("https://example.com").unwrap()
                 })
             } else {
                 RequestUrl::new(&url_to_parse).unwrap_or_else(|_| {
-                    eprintln!("DEBUG: Failed to parse URL: {}", url_to_parse);
                     RequestUrl::new("https://example.com").unwrap()
                 })
             };
-            eprintln!("DEBUG: req_url.as_str() = {}", req_url.as_str());
 
             requests.push(Request {
                 method,

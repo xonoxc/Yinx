@@ -97,7 +97,6 @@ pub struct WorkflowPane {
     workflow_state: WorkflowState,
     execution_result: Option<String>,
     graph_offset_x: u16,
-    graph_offset_y: u16,
     variable_list_state: ListState,
     variables: Vec<(String, String)>,
 }
@@ -126,7 +125,6 @@ impl WorkflowPane {
             workflow_state: WorkflowState::Pending,
             execution_result: None,
             graph_offset_x: 0,
-            graph_offset_y: 0,
             variable_list_state,
             variables: Vec::new(),
         }

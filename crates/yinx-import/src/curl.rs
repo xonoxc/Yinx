@@ -1,8 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use yinx_core::request::{
-    Header, Headers, Method, Request, RequestBody, RequestUrl, RequestBuilder,
-    request_to_curl, shell_escape,
-};
+use yinx_core::request::{Headers, Method, Request, RequestBody, RequestUrl};
 
 #[derive(Debug, PartialEq)]
 pub enum CurlParseError {
@@ -162,6 +159,7 @@ pub fn parse_curl(command: &str) -> Result<Request, CurlParseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use yinx_core::request::{request_to_curl, shell_escape, RequestBuilder};
 
     // 5.1: Curl command tokenizer
     #[test]
@@ -397,7 +395,7 @@ mod tests {
     fn test_parse_basic_auth_generates_correct_value() {
         let request = parse_curl("curl --user 'admin:secret' https://example.com").unwrap();
         let auth_header = request.headers.get("Authorization").unwrap();
-        let encoded = base64::encode("admin:secret");
+        let encoded = BASE64.encode("admin:secret");
         assert_eq!(auth_header, &format!("Basic {}", encoded));
     }
 

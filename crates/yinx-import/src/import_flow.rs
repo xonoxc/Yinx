@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use yinx_core::request::{Method, Request, RequestBody, RequestUrl};
+use yinx_core::request::Request;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ImportSource {
@@ -116,8 +116,7 @@ pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, Stri
             let requests = super::openapi::parse_openapi(&spec).map_err(|e| format!("{}", e))?;
             let items: Vec<ImportItem> = requests
                 .into_iter()
-                .enumerate()
-                .map(|(i, req)| ImportItem {
+                .map(|req| ImportItem {
                     name: format!("{} {}", req.method, req.url.as_str()),
                     request: req,
                     source: "OpenAPI".to_string(),
@@ -236,6 +235,7 @@ pub fn resolve_conflicts(items: Vec<ImportItem>) -> (Vec<ImportItem>, Vec<Confli
 #[cfg(test)]
 mod tests {
     use super::*;
+    use yinx_core::request::{Method, RequestBody, RequestUrl};
 
     // 5.24: ImportPreview struct (parsed items + selection state)
     #[test]

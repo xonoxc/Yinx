@@ -9,7 +9,7 @@ pub mod theme;
 pub mod widgets;
 pub mod workflow_pane;
 
-pub use app::{with_error_boundary, App, AppError, EventLoop, TerminalGuard};
+pub use app::{run_tui, with_error_boundary, App, AppError, EventLoop, TerminalGuard};
 pub use editor::{
     create_temp_edit_file, detect_editor, edit_with_runner, EditorError, EditorFormat,
     EditorRunResult, EditorRunner, NoopTerminalSession, SystemEditorRunner, TerminalSession,
