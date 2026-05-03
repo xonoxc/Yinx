@@ -108,7 +108,7 @@ impl Default for ExecutionOptions {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NodeExecutionResult {
     pub node_id: String,
     pub response: Option<Response>,
