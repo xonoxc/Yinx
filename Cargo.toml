@@ -74,3 +74,11 @@ clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+yinx-core = { path = "crates/yinx-core" }
+yinx-http = { path = "crates/yinx-http" }
+yinx-workflow = { path = "crates/yinx-workflow" }
+yinx-storage = { path = "crates/yinx-storage" }
+yinx-import = { path = "crates/yinx-import" }
+tokio = { workspace = true }

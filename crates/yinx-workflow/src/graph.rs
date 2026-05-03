@@ -148,6 +148,17 @@ impl Workflow {
         }
     }
 
+    /// Create a workflow from a list of requests
+    pub fn from_requests(requests: Vec<Request>, name: impl Into<String>) -> Self {
+        let mut workflow = Self::new(name);
+        for (i, request) in requests.into_iter().enumerate() {
+            let node_id = format!("node_{}", i);
+            let node = WorkflowNode::new(request).with_id(node_id);
+            let _ = workflow.add_node(node); // Ignore error for auto-generated IDs
+        }
+        workflow
+    }
+
     pub fn with_node(mut self, node: WorkflowNode) -> Result<Self, GraphError> {
         self.add_node(node)?;
         Ok(self)
