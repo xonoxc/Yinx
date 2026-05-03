@@ -11,7 +11,8 @@ use ratatui::{
 };
 use std::collections::VecDeque;
 
-use yinx_core::timing::{RequestMetrics, Timing};
+use yinx_core::metrics::MetricsCollector;
+use yinx_core::timing::RequestMetrics;
 
 use crate::theme::Theme;
 
@@ -20,6 +21,7 @@ pub enum LogsTab {
     Logs,
     Metrics,
     Histogram,
+    StatusCodes,
     Errors,
 }
 
@@ -29,6 +31,7 @@ impl LogsTab {
             LogsTab::Logs,
             LogsTab::Metrics,
             LogsTab::Histogram,
+            LogsTab::StatusCodes,
             LogsTab::Errors,
         ]
     }
@@ -38,6 +41,7 @@ impl LogsTab {
             LogsTab::Logs => "Logs",
             LogsTab::Metrics => "Metrics",
             LogsTab::Histogram => "Histogram",
+            LogsTab::StatusCodes => "Status",
             LogsTab::Errors => "Errors",
         }
     }
@@ -118,10 +122,12 @@ pub struct LogsPane {
     selected_log: usize,
     focused_field: FocusedField,
     metrics: Option<RequestMetrics>,
+    metrics_collector: MetricsCollector,
     chunk_intervals: VecDeque<u64>,
     max_intervals: usize,
     errors: Vec<LogEntry>,
     selected_error: usize,
+    error_rate_threshold: f64,
 }
 
 impl Default for LogsPane {
@@ -139,10 +145,12 @@ impl LogsPane {
             selected_log: 0,
             focused_field: FocusedField::TabContent,
             metrics: None,
+            metrics_collector: MetricsCollector::new(),
             chunk_intervals: VecDeque::new(),
             max_intervals: 50,
             errors: Vec::new(),
             selected_error: 0,
+            error_rate_threshold: 10.0,
         }
     }
 
@@ -191,11 +199,28 @@ impl LogsPane {
     }
 
     pub fn set_metrics(&mut self, metrics: RequestMetrics) {
-        self.metrics = Some(metrics);
+        self.metrics = Some(metrics.clone());
+        self.metrics_collector.record(&metrics);
     }
 
     pub fn clear_metrics(&mut self) {
         self.metrics = None;
+    }
+
+    pub fn record_metrics(&mut self, metrics: &RequestMetrics) {
+        self.metrics_collector.record(metrics);
+    }
+
+    pub fn metrics_collector(&self) -> &MetricsCollector {
+        &self.metrics_collector
+    }
+
+    pub fn metrics_collector_mut(&mut self) -> &mut MetricsCollector {
+        &mut self.metrics_collector
+    }
+
+    pub fn set_error_rate_threshold(&mut self, threshold: f64) {
+        self.error_rate_threshold = threshold;
     }
 
     pub fn add_chunk_interval(&mut self, interval_ms: u64) {
@@ -243,6 +268,7 @@ impl LogsPane {
             LogsTab::Logs => self.handle_logs_key(key_code),
             LogsTab::Metrics => self.handle_metrics_key(key_code),
             LogsTab::Histogram => self.handle_histogram_key(key_code),
+            LogsTab::StatusCodes => self.handle_status_codes_key(key_code),
             LogsTab::Errors => self.handle_errors_key(key_code),
         }
     }
@@ -284,6 +310,16 @@ impl LogsPane {
     }
 
     fn handle_histogram_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Tab => {
+                self.focused_field = FocusedField::Tabs;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_status_codes_key(&mut self, key_code: KeyCode) -> bool {
         match key_code {
             KeyCode::Tab => {
                 self.focused_field = FocusedField::Tabs;
@@ -375,6 +411,7 @@ impl LogsPane {
             LogsTab::Logs => self.render_logs(frame, area, theme),
             LogsTab::Metrics => self.render_metrics(frame, area, theme),
             LogsTab::Histogram => self.render_histogram(frame, area, theme),
+            LogsTab::StatusCodes => self.render_status_codes(frame, area, theme),
             LogsTab::Errors => self.render_errors(frame, area, theme),
         }
     }
@@ -442,9 +479,126 @@ impl LogsPane {
     }
 
     fn render_metrics(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        if let Some(ref metrics) = self.metrics {
-            let mut lines = Vec::new();
+        let mut lines = Vec::new();
 
+        // Aggregated metrics from collector
+        let collector = &self.metrics_collector;
+        let total_requests = collector.total_requests();
+
+        if total_requests > 0 {
+            // Title
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "=== Performance Summary ===",
+                    Style::default()
+                        .fg(theme.foreground.as_color())
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                ),
+            ]));
+            lines.push(Line::from(""));
+
+            // Total requests
+            lines.push(Line::from(vec![
+                Span::styled("Total Requests: ", Style::default().fg(theme.foreground.as_color())),
+                Span::styled(
+                    total_requests.to_string(),
+                    Style::default().fg(theme.semantic.info.as_color()),
+                ),
+            ]));
+
+            // Error rate with alert
+            let error_rate = collector.error_rate();
+            let error_color = if collector.error_rate_exceeds(self.error_rate_threshold) {
+                theme.semantic.error.as_color()
+            } else {
+                theme.semantic.info.as_color()
+            };
+            lines.push(Line::from(vec![
+                Span::styled("Error Rate: ", Style::default().fg(theme.foreground.as_color())),
+                Span::styled(
+                    format!("{:.1}%", error_rate),
+                    Style::default().fg(error_color).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+
+            // Total errors
+            lines.push(Line::from(vec![
+                Span::styled("Total Errors: ", Style::default().fg(theme.foreground.as_color())),
+                Span::styled(
+                    collector.total_errors().to_string(),
+                    Style::default().fg(theme.semantic.error.as_color()),
+                ),
+            ]));
+
+            // Average TTFB
+            if let Some(avg_ttfb) = collector.avg_ttfb() {
+                lines.push(Line::from(vec![
+                    Span::styled("Avg TTFB: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        format!("{:.1}ms", avg_ttfb),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
+                ]));
+            }
+
+            // Average Duration
+            if let Some(avg_dur) = collector.avg_duration() {
+                lines.push(Line::from(vec![
+                    Span::styled("Avg Duration: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        format!("{:.1}ms", avg_dur),
+                        Style::default().fg(theme.semantic.info.as_color()),
+                    ),
+                ]));
+            }
+
+            // P95
+            if let Some(p95) = collector.p95() {
+                lines.push(Line::from(vec![
+                    Span::styled("P95: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        format!("{}ms", p95),
+                        Style::default().fg(theme.semantic.warning.as_color()),
+                    ),
+                ]));
+            }
+
+            // P99
+            if let Some(p99) = collector.p99() {
+                lines.push(Line::from(vec![
+                    Span::styled("P99: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        format!("{}ms", p99),
+                        Style::default().fg(theme.semantic.error.as_color()),
+                    ),
+                ]));
+            }
+
+            // Total Retries
+            let (total_retries, _) = collector.retry_summary();
+            if total_retries > 0 {
+                lines.push(Line::from(vec![
+                    Span::styled("Total Retries: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        total_retries.to_string(),
+                        Style::default().fg(theme.semantic.warning.as_color()),
+                    ),
+                ]));
+            }
+
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "=== Current Request ===",
+                    Style::default()
+                        .fg(theme.foreground.as_color())
+                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                ),
+            ]));
+        }
+
+        // Current request metrics
+        if let Some(ref metrics) = self.metrics {
             // Status code
             if let Some(status) = metrics.status_code {
                 let status_color = if (200..300).contains(&status) {
@@ -553,36 +707,137 @@ impl LogsPane {
                     ),
                 ]));
             }
+        } else if total_requests == 0 {
+            lines.push(Line::from("No metrics available. Send a request to see metrics."));
+        }
 
-            let paragraph = Paragraph::new(lines)
+        let paragraph = Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.background.as_color())),
+            )
+            .wrap(Wrap { trim: true });
+
+        frame.render_widget(paragraph, area);
+    }
+
+    fn render_histogram(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        // Show request duration histogram if available, otherwise chunk intervals
+        let durations: Vec<u64> = self.metrics_collector.duration_history().to_vec();
+
+        if !durations.is_empty() {
+            // Create histogram buckets for request durations
+            let max_duration = durations.iter().max().copied().unwrap_or(1);
+            let bucket_count = 10.min(durations.len());
+            let bucket_size = (max_duration as f64 / bucket_count as f64).ceil() as u64 + 1;
+
+            let mut buckets = vec![0u64; bucket_count];
+            for &duration in &durations {
+                let bucket_idx =
+                    ((duration as f64 / bucket_size as f64).floor() as usize).min(bucket_count - 1);
+                buckets[bucket_idx] += 1;
+            }
+
+            let bar_labels: Vec<String> = buckets
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("{}", i * bucket_size as usize))
+                .collect();
+
+            let bar_data: Vec<(&str, u64)> = bar_labels
+                .iter()
+                .zip(buckets.iter())
+                .map(|(label, &count)| (label.as_str(), count))
+                .collect();
+
+            let barchart = BarChart::default()
                 .block(
                     Block::default()
+                        .title("Request Duration Histogram (ms)")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
                         .style(Style::default().bg(theme.pane.background.as_color())),
                 )
-                .wrap(Wrap { trim: true });
+                .bar_width(8)
+                .bar_gap(1)
+                .bar_style(Style::default().fg(theme.semantic.info.as_color()))
+                .value_style(
+                    Style::default()
+                        .fg(theme.pane.background.as_color())
+                        .bg(theme.semantic.info.as_color()),
+                )
+                .data(&bar_data);
 
-            frame.render_widget(paragraph, area);
+            frame.render_widget(barchart, area);
+        } else if !self.chunk_intervals.is_empty() {
+            // Fall back to chunk interval histogram
+            let intervals: Vec<u64> = self.chunk_intervals.iter().copied().collect();
+            let max_interval = intervals.iter().max().copied().unwrap_or(1);
+            let bucket_count = 10.min(intervals.len());
+            let bucket_size = (max_interval as f64 / bucket_count as f64).ceil() as u64 + 1;
+
+            let mut buckets = vec![0u64; bucket_count];
+            for &interval in &intervals {
+                let bucket_idx =
+                    ((interval as f64 / bucket_size as f64).floor() as usize).min(bucket_count - 1);
+                buckets[bucket_idx] += 1;
+            }
+
+            let bar_labels: Vec<String> = buckets
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format!("{}", i * bucket_size as usize))
+                .collect();
+
+            let bar_data: Vec<(&str, u64)> = bar_labels
+                .iter()
+                .zip(buckets.iter())
+                .map(|(label, &count)| (label.as_str(), count))
+                .collect();
+
+            let barchart = BarChart::default()
+                .block(
+                    Block::default()
+                        .title("Chunk Interval Histogram (ms)")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border.color.as_color()))
+                        .style(Style::default().bg(theme.pane.background.as_color())),
+                )
+                .bar_width(8)
+                .bar_gap(1)
+                .bar_style(Style::default().fg(theme.semantic.info.as_color()))
+                .value_style(
+                    Style::default()
+                        .fg(theme.pane.background.as_color())
+                        .bg(theme.semantic.info.as_color()),
+                )
+                .data(&bar_data);
+
+            frame.render_widget(barchart, area);
         } else {
-            let paragraph = Paragraph::new("No metrics available. Send a request to see metrics.")
-                .style(Style::default().fg(theme.foreground.as_color()))
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.background.as_color())),
-                )
-                .alignment(Alignment::Center);
+            let paragraph =
+                Paragraph::new("No data available. Send requests to see the histogram.")
+                    .style(Style::default().fg(theme.foreground.as_color()))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .border_style(Style::default().fg(theme.border.color.as_color()))
+                            .style(Style::default().bg(theme.pane.background.as_color())),
+                    )
+                    .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
         }
     }
 
-    fn render_histogram(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        if self.chunk_intervals.is_empty() {
+    fn render_status_codes(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let collector = &self.metrics_collector;
+
+        if collector.total_requests() == 0 {
             let paragraph =
-                Paragraph::new("No chunk data available. Start streaming to see the histogram.")
+                Paragraph::new("No request data available. Send requests to see status code distribution.")
                     .style(Style::default().fg(theme.foreground.as_color()))
                     .block(
                         Block::default()
@@ -596,50 +851,39 @@ impl LogsPane {
             return;
         }
 
-        // Create histogram buckets
-        let intervals: Vec<u64> = self.chunk_intervals.iter().copied().collect();
-        let max_interval = intervals.iter().max().copied().unwrap_or(1);
-        let bucket_count = 10.min(intervals.len());
-        let bucket_size = (max_interval as f64 / bucket_count as f64).ceil() as u64 + 1;
+        // Get status code distribution and render as bar chart
+        let distribution = collector.status_distribution();
 
-        let mut buckets = vec![0u64; bucket_count];
-        for &interval in &intervals {
-            let bucket_idx =
-                ((interval as f64 / bucket_size as f64).floor() as usize).min(bucket_count - 1);
-            buckets[bucket_idx] += 1;
+        // Create bar chart data from grouped distribution
+        let bar_data: Vec<(&str, u64)> = distribution
+            .iter()
+            .map(|(label, count)| (label.as_str(), u64::from(*count)))
+            .collect();
+
+        if !bar_data.is_empty() {
+            let barchart = BarChart::default()
+                .block(
+                    Block::default()
+                        .title("Status Code Distribution")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border.color.as_color()))
+                        .style(Style::default().bg(theme.pane.background.as_color())),
+                )
+                .bar_width(8)
+                .bar_gap(1)
+                .bar_style(Style::default().fg(theme.semantic.info.as_color()))
+                .value_style(
+                    Style::default()
+                        .fg(theme.pane.background.as_color())
+                        .bg(theme.semantic.info.as_color()),
+                )
+                .data(&bar_data);
+
+            frame.render_widget(barchart, area);
         }
 
-        let bar_labels: Vec<String> = buckets
-            .iter()
-            .enumerate()
-            .map(|(i, _)| format!("{}", i * bucket_size as usize))
-            .collect();
-
-        let bar_data: Vec<(&str, u64)> = bar_labels
-            .iter()
-            .zip(buckets.iter())
-            .map(|(label, &count)| (label.as_str(), count))
-            .collect();
-
-        let barchart = BarChart::default()
-            .block(
-                Block::default()
-                    .title("Chunk Interval Histogram (ms)")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color())),
-            )
-            .bar_width(8)
-            .bar_gap(1)
-            .bar_style(Style::default().fg(theme.semantic.info.as_color()))
-            .value_style(
-                Style::default()
-                    .fg(theme.pane.background.as_color())
-                    .bg(theme.semantic.info.as_color()),
-            )
-            .data(&bar_data);
-
-        frame.render_widget(barchart, area);
+        // Also show detailed breakdown below the chart (if space permits)
+        // This would require splitting the area, but for simplicity, we just show the chart
     }
 
     fn render_errors(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -730,12 +974,12 @@ fn format_bytes(bytes: usize) -> String {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyModifiers};
-    use yinx_core::timing::RequestMetrics;
+    use yinx_core::timing::{RequestMetrics, Timing};
 
     #[test]
     fn test_logs_tab_all() {
         let tabs = LogsTab::all();
-        assert_eq!(tabs.len(), 4);
+        assert_eq!(tabs.len(), 5);
     }
 
     #[test]
@@ -743,6 +987,7 @@ mod tests {
         assert_eq!(LogsTab::Logs.as_str(), "Logs");
         assert_eq!(LogsTab::Metrics.as_str(), "Metrics");
         assert_eq!(LogsTab::Histogram.as_str(), "Histogram");
+        assert_eq!(LogsTab::StatusCodes.as_str(), "Status");
         assert_eq!(LogsTab::Errors.as_str(), "Errors");
     }
 
@@ -781,6 +1026,37 @@ mod tests {
         assert_eq!(pane.selected_tab, 0);
         assert!(pane.logs.is_empty());
         assert!(pane.metrics.is_none());
+        assert_eq!(pane.metrics_collector.total_requests(), 0);
+    }
+
+    #[test]
+    fn test_logs_pane_record_metrics() {
+        let mut pane = LogsPane::new();
+        let timing = Timing::new().with_ttfb(100).with_total(200);
+        let metrics = RequestMetrics::new()
+            .with_timing(timing)
+            .with_status_code(200);
+        pane.record_metrics(&metrics);
+        assert_eq!(pane.metrics_collector.total_requests(), 1);
+    }
+
+    #[test]
+    fn test_logs_pane_set_metrics_records_to_collector() {
+        let mut pane = LogsPane::new();
+        let timing = Timing::new().with_ttfb(100).with_total(200);
+        let metrics = RequestMetrics::new()
+            .with_timing(timing)
+            .with_status_code(200);
+        pane.set_metrics(metrics);
+        assert_eq!(pane.metrics_collector.total_requests(), 1);
+        assert!(pane.metrics.is_some());
+    }
+
+    #[test]
+    fn test_logs_pane_error_rate_threshold() {
+        let mut pane = LogsPane::new();
+        pane.set_error_rate_threshold(5.0);
+        assert_eq!(pane.error_rate_threshold, 5.0);
     }
 
     #[test]
