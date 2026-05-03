@@ -4,6 +4,7 @@ pub mod input;
 pub mod layout;
 pub mod logs_pane;
 pub mod request_pane;
+pub mod settings_pane;
 pub mod theme;
 pub mod widgets;
 pub mod workflow_pane;
@@ -18,4 +19,5 @@ pub use logs_pane::{FocusedField as LogsFocusedField, LogEntry, LogLevel, LogsPa
 pub use request_pane::{
     AuthType, BodyType, EditableField, FocusedField, RequestPane, RequestPaneEditSpec, RequestTab,
 };
+pub use settings_pane::SettingsPane;
 pub use workflow_pane::{NodeStatus, WorkflowPane, WorkflowTab};

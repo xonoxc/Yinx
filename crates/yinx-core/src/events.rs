@@ -44,6 +44,12 @@ pub enum AppEvent {
     ImportStarted { source: String },
     ImportCompleted { count: usize },
     ImportFailed { error: String },
+
+    // Settings events
+    SettingsOpened,
+    SettingsChanged { key: String, value: String },
+    SettingsSaved,
+    SettingsClosed,
 }
 
 pub struct EventBus {
@@ -216,6 +222,12 @@ impl StateReducer {
                 diff.app_state_changed = true;
             }
             AppEvent::ImportFailed { .. } => {}
+            AppEvent::SettingsOpened => {}
+            AppEvent::SettingsChanged { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::SettingsSaved => {}
+            AppEvent::SettingsClosed => {}
         }
 
         diff
@@ -640,6 +652,49 @@ mod tests {
         let diff = reducer.reduce(&event);
         assert!(diff.network_state_changed);
         assert!(reducer.network_state.is_streaming());
+    }
+
+    #[test]
+    fn test_state_reducer_import_completed() {
+        let mut reducer = StateReducer::new();
+        let event = AppEvent::ImportCompleted { count: 5 };
+        let diff = reducer.reduce(&event);
+        assert!(diff.app_state_changed);
+    }
+
+    #[test]
+    fn test_state_reducer_settings_opened() {
+        let mut reducer = StateReducer::new();
+        let event = AppEvent::SettingsOpened;
+        let diff = reducer.reduce(&event);
+        assert!(!diff.any());
+    }
+
+    #[test]
+    fn test_state_reducer_settings_changed() {
+        let mut reducer = StateReducer::new();
+        let event = AppEvent::SettingsChanged {
+            key: "theme".to_string(),
+            value: "light".to_string(),
+        };
+        let diff = reducer.reduce(&event);
+        assert!(diff.app_state_changed);
+    }
+
+    #[test]
+    fn test_state_reducer_settings_saved() {
+        let mut reducer = StateReducer::new();
+        let event = AppEvent::SettingsSaved;
+        let diff = reducer.reduce(&event);
+        assert!(!diff.any());
+    }
+
+    #[test]
+    fn test_state_reducer_settings_closed() {
+        let mut reducer = StateReducer::new();
+        let event = AppEvent::SettingsClosed;
+        let diff = reducer.reduce(&event);
+        assert!(!diff.any());
     }
 
     #[tokio::test]

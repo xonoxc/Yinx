@@ -284,6 +284,21 @@ impl LogsPane {
             LogsTab::Histogram => self.handle_histogram_key(key_code),
             LogsTab::StatusCodes => self.handle_status_codes_key(key_code),
             LogsTab::Errors => self.handle_errors_key(key_code),
+            LogsTab::Curl => self.handle_curl_key(key_code),
+        }
+    }
+
+    fn handle_curl_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.selected_log = self.selected_log.saturating_sub(1);
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.selected_log = (self.selected_log + 1).min(self.logs.len().saturating_sub(1));
+                true
+            }
+            _ => false,
         }
     }
 
@@ -1027,7 +1042,7 @@ mod tests {
     #[test]
     fn test_logs_tab_all() {
         let tabs = LogsTab::all();
-        assert_eq!(tabs.len(), 5);
+        assert_eq!(tabs.len(), 6);
     }
 
     #[test]

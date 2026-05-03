@@ -1,0 +1,8 @@
+theme: light
+keybindings: {}
+defaults:
+  theme: dark
+  default_timeout_secs: 30
+  follow_redirects: true
+  verify_tls: true
+  max_history_entries: 1000
