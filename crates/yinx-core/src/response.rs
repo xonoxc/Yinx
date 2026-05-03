@@ -144,6 +144,15 @@ impl ResponseBody {
             _ => None,
         }
     }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self {
+            ResponseBody::Text(s) => s.as_bytes().to_vec(),
+            ResponseBody::Json(v) => serde_json::to_vec(v).unwrap_or_default(),
+            ResponseBody::Binary(b) | ResponseBody::Stream(b) => b.clone(),
+            ResponseBody::None => Vec::new(),
+        }
+    }
 }
 
 impl From<&str> for ResponseBody {
@@ -377,6 +386,18 @@ mod tests {
     fn test_response_body_pretty_json_non_json_returns_none() {
         let body = ResponseBody::Text("not json".to_string());
         assert!(body.pretty_json().is_none());
+    }
+
+    #[test]
+    fn test_response_body_to_bytes() {
+        assert_eq!(
+            ResponseBody::Text("hello".to_string()).to_bytes(),
+            b"hello".to_vec()
+        );
+        assert_eq!(
+            ResponseBody::Binary(vec![1, 2, 3]).to_bytes(),
+            vec![1, 2, 3]
+        );
     }
 
     #[test]

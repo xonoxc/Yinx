@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 use yinx_core::state::NetworkState;
-use yinx_http::streaming::{SnapshotKind, TimelineState};
+use yinx_http::streaming::{SnapshotKind, TimelineJumpTarget, TimelineState};
 
 use crate::theme::Theme;
 
@@ -466,10 +466,25 @@ impl TimelineWidget {
         &self.timeline
     }
 
+    pub fn timeline_mut(&mut self) -> &mut TimelineState {
+        &mut self.timeline
+    }
+
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::Left => self.timeline.move_prev(),
             KeyCode::Right => self.timeline.move_next(),
+            KeyCode::Home | KeyCode::Char('t') => {
+                self.timeline.jump_to(TimelineJumpTarget::Ttfb).is_some()
+            }
+            KeyCode::Char('e') => self
+                .timeline
+                .jump_to(TimelineJumpTarget::FirstError)
+                .is_some(),
+            KeyCode::End | KeyCode::Char('f') => self
+                .timeline
+                .jump_to(TimelineJumpTarget::LastChunk)
+                .is_some(),
             _ => false,
         }
     }
@@ -535,10 +550,46 @@ impl TimelineWidget {
         chars.into_iter().collect()
     }
 
+    pub fn summary_line(&self) -> String {
+        match self.timeline.current_snapshot() {
+            Some(snapshot) => format!(
+                "{} @ {} bytes",
+                match snapshot.kind {
+                    SnapshotKind::Ttfb => "TTFB",
+                    SnapshotKind::Error => "ERROR",
+                    SnapshotKind::LastChunk => "FINAL",
+                    SnapshotKind::ChunkBoundary => "CHUNK",
+                },
+                snapshot.offset
+            ),
+            None => "No snapshots recorded".to_string(),
+        }
+    }
+
+    pub fn diff_line(&self) -> String {
+        let Some(current) = self.timeline.current_index() else {
+            return "Diff: n/a".to_string();
+        };
+
+        if current == 0 {
+            return "Diff: start of timeline".to_string();
+        }
+
+        match self.timeline.diff(current - 1, current) {
+            Some(diff) => {
+                let rendered = diff.render().replace('\n', " ");
+                format!("Diff: {rendered}")
+            }
+            None => "Diff: binary or unavailable".to_string(),
+        }
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let lines = vec![
             Line::from(self.progress_line(area.width.saturating_sub(2))),
             Line::from(self.marker_line(area.width.saturating_sub(2))),
+            Line::from(self.summary_line()),
+            Line::from(self.diff_line()),
         ];
 
         let paragraph = Paragraph::new(lines)
@@ -880,15 +931,31 @@ mod tests {
     }
 
     #[test]
+    fn test_timeline_widget_handle_key_jump_targets() {
+        let mut widget = TimelineWidget::new(sample_timeline());
+
+        assert!(widget.handle_key(crossterm::event::KeyCode::Char('t')));
+        assert_eq!(widget.timeline().current_index(), Some(0));
+        assert!(!widget.handle_key(crossterm::event::KeyCode::Char('e')));
+        assert_eq!(widget.timeline().current_index(), Some(0));
+        assert!(widget.handle_key(crossterm::event::KeyCode::Char('f')));
+        assert_eq!(widget.timeline().current_index(), Some(2));
+    }
+
+    #[test]
     fn test_timeline_widget_render_lines_include_progress_and_markers() {
         let widget = TimelineWidget::new(sample_timeline());
         let progress = widget.progress_line(12);
         let markers = widget.marker_line(12);
+        let summary = widget.summary_line();
+        let diff = widget.diff_line();
 
         assert!(progress.contains('['));
         assert!(progress.contains('|'));
         assert!(progress.contains("3/3"));
         assert!(markers.contains('T'));
         assert!(markers.contains('F'));
+        assert!(summary.contains("FINAL"));
+        assert!(diff.contains('+'));
     }
 }

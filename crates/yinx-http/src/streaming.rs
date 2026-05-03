@@ -1,6 +1,10 @@
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use yinx_core::{
+    response::Response,
+    state::{HistoryEntry, TimelineRecord, TimelineSnapshotKind, TimelineSnapshotRecord},
+};
 
 // ==================== 4A: Chunked Streaming ====================
 
@@ -531,6 +535,28 @@ pub enum SnapshotKind {
     LastChunk,
 }
 
+impl From<SnapshotKind> for TimelineSnapshotKind {
+    fn from(value: SnapshotKind) -> Self {
+        match value {
+            SnapshotKind::ChunkBoundary => TimelineSnapshotKind::ChunkBoundary,
+            SnapshotKind::Ttfb => TimelineSnapshotKind::Ttfb,
+            SnapshotKind::Error => TimelineSnapshotKind::Error,
+            SnapshotKind::LastChunk => TimelineSnapshotKind::LastChunk,
+        }
+    }
+}
+
+impl From<TimelineSnapshotKind> for SnapshotKind {
+    fn from(value: TimelineSnapshotKind) -> Self {
+        match value {
+            TimelineSnapshotKind::ChunkBoundary => SnapshotKind::ChunkBoundary,
+            TimelineSnapshotKind::Ttfb => SnapshotKind::Ttfb,
+            TimelineSnapshotKind::Error => SnapshotKind::Error,
+            TimelineSnapshotKind::LastChunk => SnapshotKind::LastChunk,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct TimelineSnapshot {
     pub kind: SnapshotKind,
@@ -564,6 +590,28 @@ impl TimelineSnapshot {
 
     pub fn body_text(&self) -> Option<&str> {
         std::str::from_utf8(&self.body).ok()
+    }
+}
+
+impl From<TimelineSnapshotRecord> for TimelineSnapshot {
+    fn from(value: TimelineSnapshotRecord) -> Self {
+        Self {
+            kind: value.kind.into(),
+            offset: value.offset,
+            timestamp: value.timestamp,
+            body: value.body,
+        }
+    }
+}
+
+impl From<&TimelineSnapshot> for TimelineSnapshotRecord {
+    fn from(value: &TimelineSnapshot) -> Self {
+        Self {
+            kind: value.kind.into(),
+            offset: value.offset,
+            timestamp: value.timestamp,
+            body: value.body.clone(),
+        }
     }
 }
 
@@ -629,6 +677,17 @@ impl TimelineState {
         self.current_index.and_then(|index| self.snapshot(index))
     }
 
+    pub fn scrub_to(&mut self, index: usize) -> Option<&TimelineSnapshot> {
+        if self.snapshots.is_empty() {
+            self.current_index = None;
+            return None;
+        }
+
+        let clamped = index.min(self.snapshots.len().saturating_sub(1));
+        self.current_index = Some(clamped);
+        self.current_snapshot()
+    }
+
     pub fn push_snapshot(&mut self, snapshot: TimelineSnapshot) {
         self.assembled_body = snapshot.body().to_vec();
         self.snapshots.push(snapshot);
@@ -653,6 +712,17 @@ impl TimelineState {
         )
         .with_kind(kind);
         self.push_snapshot(snapshot);
+    }
+
+    pub fn capture_error(
+        &mut self,
+        body: impl Into<Vec<u8>>,
+        offset: u64,
+        timestamp: DateTime<Utc>,
+    ) {
+        self.push_snapshot(
+            TimelineSnapshot::new(body, offset, timestamp).with_kind(SnapshotKind::Error),
+        );
     }
 
     pub fn move_prev(&mut self) -> bool {
@@ -711,12 +781,81 @@ impl TimelineState {
         self.current_index = Some(index);
         Some(index)
     }
+
+    pub fn to_record(&self) -> TimelineRecord {
+        TimelineRecord {
+            snapshots: self
+                .snapshots
+                .iter()
+                .map(TimelineSnapshotRecord::from)
+                .collect(),
+            current_index: self.current_index,
+        }
+    }
+
+    pub fn from_record(record: TimelineRecord) -> Self {
+        let snapshots: Vec<TimelineSnapshot> = record
+            .snapshots
+            .into_iter()
+            .map(TimelineSnapshot::from)
+            .collect();
+        let current_index = if snapshots.is_empty() {
+            None
+        } else {
+            record
+                .current_index
+                .or_else(|| snapshots.len().checked_sub(1))
+                .map(|index| index.min(snapshots.len().saturating_sub(1)))
+        };
+        let assembled_body = current_index
+            .and_then(|index| snapshots.get(index))
+            .map(|snapshot| snapshot.body().to_vec())
+            .or_else(|| snapshots.last().map(|snapshot| snapshot.body().to_vec()))
+            .unwrap_or_default();
+
+        Self {
+            snapshots,
+            current_index,
+            assembled_body,
+        }
+    }
+
+    pub fn from_response(response: &Response) -> Self {
+        let mut timeline = Self::new();
+        let body = response.body.to_bytes();
+        if body.is_empty() {
+            return timeline;
+        }
+
+        let kind = if response.is_error() {
+            SnapshotKind::Error
+        } else {
+            SnapshotKind::LastChunk
+        };
+        timeline.push_snapshot(
+            TimelineSnapshot::new(body.clone(), body.len() as u64, Utc::now()).with_kind(kind),
+        );
+        timeline
+    }
+
+    pub fn replay_history_entry(entry: &HistoryEntry) -> Option<Self> {
+        if let Some(record) = entry.timeline.clone() {
+            return Some(Self::from_record(record));
+        }
+
+        entry.response.as_ref().map(Self::from_response)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use yinx_core::{
+        request::RequestBuilder,
+        response::{ResponseBody, ResponseBuilder},
+        timing::Timing,
+    };
 
     // ==================== 4.1: StreamConfig ====================
 
@@ -1325,6 +1464,11 @@ mod tests {
         assert_eq!(timeline.current_index(), Some(2));
         assert!(!timeline.move_next());
         assert_eq!(timeline.current_index(), Some(2));
+
+        assert_eq!(timeline.scrub_to(0).unwrap().body_text(), Some("one"));
+        assert_eq!(timeline.current_index(), Some(0));
+        assert_eq!(timeline.scrub_to(99).unwrap().body_text(), Some("three"));
+        assert_eq!(timeline.current_index(), Some(2));
     }
 
     #[test]
@@ -1354,5 +1498,78 @@ mod tests {
         assert_eq!(timeline.current_index(), Some(2));
         assert_eq!(timeline.jump_to(TimelineJumpTarget::LastChunk), Some(3));
         assert_eq!(timeline.current_index(), Some(3));
+    }
+
+    #[test]
+    fn test_timeline_record_roundtrip_preserves_snapshots() {
+        let mut timeline = TimelineState::new();
+        timeline.push_snapshot(TimelineSnapshot::from_text("hello").with_kind(SnapshotKind::Ttfb));
+        timeline.capture_error("hello!", 6, Utc.timestamp_opt(1_000_002, 0).unwrap());
+
+        let restored = TimelineState::from_record(timeline.to_record());
+        assert_eq!(restored, timeline);
+    }
+
+    #[test]
+    fn test_replay_history_entry_prefers_recorded_timeline() {
+        let request = RequestBuilder::new()
+            .url("https://example.com")
+            .build()
+            .unwrap();
+        let response = ResponseBuilder::new()
+            .status(200)
+            .body(ResponseBody::Text("final only".to_string()))
+            .build();
+
+        let mut recorded = TimelineState::new();
+        recorded
+            .push_snapshot(TimelineSnapshot::from_text("partial").with_kind(SnapshotKind::Ttfb));
+        recorded.push_snapshot(
+            TimelineSnapshot::from_text("partial done").with_kind(SnapshotKind::LastChunk),
+        );
+
+        let entry = HistoryEntry {
+            id: "history-1".to_string(),
+            request,
+            response: Some(response),
+            timestamp: Utc::now(),
+            timing: Timing::new(),
+            timeline: Some(recorded.to_record()),
+        };
+
+        let replayed = TimelineState::replay_history_entry(&entry).unwrap();
+        assert_eq!(replayed, recorded);
+    }
+
+    #[test]
+    fn test_replay_history_entry_falls_back_to_response_body() {
+        let request = RequestBuilder::new()
+            .url("https://example.com")
+            .build()
+            .unwrap();
+        let response = ResponseBuilder::new()
+            .status(500)
+            .body(ResponseBody::Text("server exploded".to_string()))
+            .build();
+
+        let entry = HistoryEntry {
+            id: "history-2".to_string(),
+            request,
+            response: Some(response),
+            timestamp: Utc::now(),
+            timing: Timing::new(),
+            timeline: None,
+        };
+
+        let replayed = TimelineState::replay_history_entry(&entry).unwrap();
+        assert_eq!(replayed.len(), 1);
+        assert_eq!(
+            replayed.current_snapshot().unwrap().body_text(),
+            Some("server exploded")
+        );
+        assert_eq!(
+            replayed.current_snapshot().unwrap().kind,
+            SnapshotKind::Error
+        );
     }
 }

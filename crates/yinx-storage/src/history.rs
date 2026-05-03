@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use yinx_core::request::Request;
 use yinx_core::response::Response;
-use yinx_core::state::HistoryEntry;
+use yinx_core::state::{HistoryEntry, TimelineRecord};
 use yinx_core::timing::Timing;
 
 #[derive(Debug, Error)]
@@ -30,6 +30,7 @@ struct HistoryLine {
     request: Request,
     response: Option<Response>,
     timing: Timing,
+    timeline: Option<TimelineRecord>,
 }
 
 impl From<&HistoryEntry> for HistoryLine {
@@ -40,6 +41,7 @@ impl From<&HistoryEntry> for HistoryLine {
             request: entry.request.clone(),
             response: entry.response.clone(),
             timing: entry.timing.clone(),
+            timeline: entry.timeline.clone(),
         }
     }
 }
@@ -52,6 +54,7 @@ impl From<HistoryLine> for HistoryEntry {
             response: line.response,
             timestamp: line.timestamp,
             timing: line.timing,
+            timeline: line.timeline,
         }
     }
 }
@@ -260,6 +263,10 @@ impl HistoryStore {
         self.get_by_id(entry_id)
     }
 
+    pub fn replay_timeline(&self, entry_id: &str) -> Result<Option<TimelineRecord>> {
+        Ok(self.get_by_id(entry_id)?.and_then(|entry| entry.timeline))
+    }
+
     pub fn clear(&mut self) -> Result<()> {
         File::create(&self.path)?;
         Ok(())
@@ -291,6 +298,7 @@ mod tests {
             response: Some(response),
             timestamp: Utc::now(),
             timing: yinx_core::timing::Timing::new().with_total(100),
+            timeline: None,
         }
     }
 
@@ -412,6 +420,26 @@ mod tests {
 
         let replayed = store.replay_entry(&id).unwrap();
         assert_eq!(replayed, Some(entry));
+    }
+
+    #[test]
+    fn test_replay_timeline_exact_match() {
+        let (mut store, _dir) = setup_store();
+        let mut entry = create_test_entry();
+        entry.timeline = Some(yinx_core::state::TimelineRecord {
+            snapshots: vec![yinx_core::state::TimelineSnapshotRecord {
+                kind: yinx_core::state::TimelineSnapshotKind::LastChunk,
+                offset: 4,
+                timestamp: Utc::now(),
+                body: b"test".to_vec(),
+            }],
+            current_index: Some(0),
+        });
+        let id = entry.id.clone();
+        store.append(&entry).unwrap();
+
+        let replayed = store.replay_timeline(&id).unwrap();
+        assert_eq!(replayed, entry.timeline);
     }
 
     #[test]

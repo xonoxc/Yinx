@@ -14,12 +14,50 @@ pub struct SavedRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum TimelineSnapshotKind {
+    ChunkBoundary,
+    Ttfb,
+    Error,
+    LastChunk,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TimelineSnapshotRecord {
+    pub kind: TimelineSnapshotKind,
+    pub offset: u64,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub body: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct TimelineRecord {
+    pub snapshots: Vec<TimelineSnapshotRecord>,
+    pub current_index: Option<usize>,
+}
+
+impl TimelineRecord {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn len(&self) -> usize {
+        self.snapshots.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.snapshots.is_empty()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HistoryEntry {
     pub id: String,
     pub request: Request,
     pub response: Option<Response>,
     pub timestamp: chrono::DateTime<chrono::Utc>,
     pub timing: Timing,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeline: Option<TimelineRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

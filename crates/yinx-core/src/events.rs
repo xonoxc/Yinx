@@ -285,10 +285,29 @@ mod tests {
             response: None,
             timestamp: chrono::Utc::now(),
             timing: crate::timing::Timing::new(),
+            timeline: None,
         };
         state.add_history_entry(entry);
         assert_eq!(state.history_len(), 1);
         assert_eq!(state.history_iter().count(), 1);
+    }
+
+    #[test]
+    fn test_timeline_record_state_management() {
+        let mut record = crate::state::TimelineRecord::new();
+        assert!(record.is_empty());
+
+        record.snapshots.push(crate::state::TimelineSnapshotRecord {
+            kind: crate::state::TimelineSnapshotKind::Ttfb,
+            offset: 3,
+            timestamp: chrono::Utc::now(),
+            body: b"hey".to_vec(),
+        });
+        record.current_index = Some(0);
+
+        assert_eq!(record.len(), 1);
+        assert!(!record.is_empty());
+        assert_eq!(record.current_index, Some(0));
     }
 
     #[test]
