@@ -404,6 +404,63 @@ impl RequestBuilder {
     }
 }
 
+pub fn shell_escape(s: &str) -> String {
+    if !s.contains('\'') {
+        return format!("'{}'", s);
+    }
+    let mut result = String::new();
+    result.push('\'');
+    for c in s.chars() {
+        if c == '\'' {
+            result.push_str("'\\''");
+        } else {
+            result.push(c);
+        }
+    }
+    result.push('\'');
+    result
+}
+
+pub fn request_to_curl(request: &Request) -> String {
+    let mut parts = vec!["curl".to_string()];
+    if request.method != Method::Get {
+        parts.push(format!("-X {}", request.method.as_str()));
+    }
+    for (name, value) in request.headers.to_pairs() {
+        let header_str = format!("{}: {}", name, value);
+        parts.push(format!("-H {}", shell_escape(&header_str)));
+    }
+    match &request.body {
+        RequestBody::Raw(data) => {
+            parts.push(format!("-d {}", shell_escape(data)));
+        }
+        RequestBody::Json(value) => {
+            let json_str = serde_json::to_string(value).unwrap_or_default();
+            parts.push(format!("-d {}", shell_escape(&json_str)));
+        }
+        RequestBody::Form(pairs) => {
+            let form_str = pairs
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("&");
+            parts.push(format!("-d {}", shell_escape(&form_str)));
+        }
+        RequestBody::Multipart(pairs) => {
+            for (name, value) in pairs {
+                parts.push(format!("-F {}={}", shell_escape(name), shell_escape(value)));
+            }
+        }
+        RequestBody::Binary(data) => {
+            let data_str = String::from_utf8_lossy(data);
+            parts.push(format!("--data-binary {}", shell_escape(&data_str)));
+        }
+        RequestBody::None => {}
+    }
+    parts.push(shell_escape(request.url.as_str()));
+    parts.join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -816,5 +873,118 @@ mod tests {
         let json = serde_json::to_string(&body).unwrap();
         let decoded: RequestBody = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded, body);
+    }
+
+    // Tests for shell_escape and request_to_curl
+    #[test]
+    fn test_shell_escape_no_special_chars() {
+        assert_eq!(shell_escape("hello"), "'hello'");
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_single_quote() {
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_double_quote() {
+        assert_eq!(shell_escape("say \"hi\""), "'say \"hi\"'");
+    }
+
+    #[test]
+    fn test_request_to_curl_get() {
+        let request = RequestBuilder::new()
+            .url("https://example.com")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert_eq!(curl, "curl 'https://example.com/'");
+    }
+
+    #[test]
+    fn test_request_to_curl_post_json() {
+        let request = RequestBuilder::new()
+            .method(Method::Post)
+            .url("https://api.example.com/v1/users")
+            .header("Content-Type", "application/json")
+            .body(RequestBody::Json(serde_json::json!({"name": "test"})))
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("curl"));
+        assert!(curl.contains("-X POST"));
+        assert!(curl.contains("-H 'Content-Type: application/json'"));
+        assert!(curl.contains("-d"));
+        assert!(curl.contains("'https://api.example.com/v1/users'"));
+    }
+
+    #[test]
+    fn test_request_to_curl_with_multiple_headers() {
+        let request = RequestBuilder::new()
+            .url("https://example.com")
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer token123")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("-H 'Accept: application/json'"));
+        assert!(curl.contains("-H 'Authorization: Bearer token123'"));
+    }
+
+    #[test]
+    fn test_request_to_curl_put_form() {
+        let request = RequestBuilder::new()
+            .method(Method::Put)
+            .url("https://example.com/api")
+            .body(RequestBody::Form(vec![
+                ("status".to_string(), "active".to_string()),
+                ("role".to_string(), "admin".to_string()),
+            ]))
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("-X PUT"));
+        assert!(curl.contains("-d"));
+        assert!(curl.contains("status=active"));
+        assert!(curl.contains("role=admin"));
+    }
+
+    #[test]
+    fn test_request_to_curl_delete() {
+        let request = RequestBuilder::new()
+            .method(Method::Delete)
+            .url("https://api.example.com/v1/users/123")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("-X DELETE"));
+        assert!(curl.contains("'https://api.example.com/v1/users/123'"));
+    }
+
+    #[test]
+    fn test_round_trip_get() {
+        let original = RequestBuilder::new()
+            .url("https://example.com")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&original);
+        // For GET, no -X flag is added
+        assert!(!curl.contains("-X"));
+    }
+
+    #[test]
+    fn test_round_trip_post_json() {
+        let original = RequestBuilder::new()
+            .method(Method::Post)
+            .url("https://api.example.com/v1/users")
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .body(RequestBody::Json(serde_json::json!({"key": "value"})))
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&original);
+        assert!(curl.contains("-X POST"));
+        assert!(curl.contains("application/json"));
     }
 }

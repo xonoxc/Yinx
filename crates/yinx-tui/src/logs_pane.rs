@@ -12,6 +12,7 @@ use ratatui::{
 use std::collections::VecDeque;
 
 use yinx_core::metrics::MetricsCollector;
+use yinx_core::request::{Request, request_to_curl};
 use yinx_core::timing::RequestMetrics;
 
 use crate::theme::Theme;
@@ -23,6 +24,7 @@ pub enum LogsTab {
     Histogram,
     StatusCodes,
     Errors,
+    Curl,
 }
 
 impl LogsTab {
@@ -33,6 +35,7 @@ impl LogsTab {
             LogsTab::Histogram,
             LogsTab::StatusCodes,
             LogsTab::Errors,
+            LogsTab::Curl,
         ]
     }
 
@@ -43,6 +46,7 @@ impl LogsTab {
             LogsTab::Histogram => "Histogram",
             LogsTab::StatusCodes => "Status",
             LogsTab::Errors => "Errors",
+            LogsTab::Curl => "Curl",
         }
     }
 }
@@ -128,6 +132,7 @@ pub struct LogsPane {
     errors: Vec<LogEntry>,
     selected_error: usize,
     error_rate_threshold: f64,
+    current_request: Option<Request>,
 }
 
 impl Default for LogsPane {
@@ -151,7 +156,16 @@ impl LogsPane {
             errors: Vec::new(),
             selected_error: 0,
             error_rate_threshold: 10.0,
+            current_request: None,
         }
+    }
+
+    pub fn set_current_request(&mut self, request: Request) {
+        self.current_request = Some(request);
+    }
+
+    pub fn clear_current_request(&mut self) {
+        self.current_request = None;
     }
 
     pub fn with_max_logs(mut self, max: usize) -> Self {
@@ -413,6 +427,7 @@ impl LogsPane {
             LogsTab::Histogram => self.render_histogram(frame, area, theme),
             LogsTab::StatusCodes => self.render_status_codes(frame, area, theme),
             LogsTab::Errors => self.render_errors(frame, area, theme),
+            LogsTab::Curl => self.render_curl(frame, area, theme),
         }
     }
 
@@ -955,6 +970,39 @@ impl LogsPane {
         state.select(Some(self.selected_error));
 
         frame.render_stateful_widget(list, area, &mut state);
+    }
+
+    fn render_curl(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        if let Some(ref request) = self.current_request {
+            let curl_cmd = request_to_curl(request);
+            let lines: Vec<Line> = curl_cmd
+                .lines()
+                .map(|line| Line::from(vec![Span::styled(line, Style::default().fg(theme.foreground.as_color()))]))
+                .collect();
+
+            let paragraph = Paragraph::new(lines)
+                .block(
+                    Block::default()
+                        .title("Curl Equivalent")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border.color.as_color()))
+                        .style(Style::default().bg(theme.pane.background.as_color())),
+                )
+                .wrap(Wrap { trim: true });
+            frame.render_widget(paragraph, area);
+        } else {
+            let paragraph = Paragraph::new("No request available. Create a request to see the curl equivalent.")
+                .style(Style::default().fg(theme.foreground.as_color()))
+                .block(
+                    Block::default()
+                        .title("Curl Equivalent")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(theme.border.color.as_color()))
+                        .style(Style::default().bg(theme.pane.background.as_color())),
+                )
+                .alignment(Alignment::Center);
+            frame.render_widget(paragraph, area);
+        }
     }
 }
 

@@ -1,5 +1,8 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use yinx_core::request::{Header, Headers, Method, Request, RequestBody, RequestUrl};
+use yinx_core::request::{
+    Header, Headers, Method, Request, RequestBody, RequestUrl, RequestBuilder,
+    request_to_curl, shell_escape,
+};
 
 #[derive(Debug, PartialEq)]
 pub enum CurlParseError {
@@ -458,5 +461,180 @@ mod tests {
             }
             _ => panic!("Expected Form body"),
         }
+    }
+
+    // 13.1: "Copy as curl" - generate curl command from request
+    #[test]
+    fn test_request_to_curl_get() {
+        let request = RequestBuilder::new()
+            .url("https://example.com")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert_eq!(curl, "curl 'https://example.com/'");
+    }
+
+    #[test]
+    fn test_request_to_curl_post_json() {
+        let request = RequestBuilder::new()
+            .method(Method::Post)
+            .url("https://api.example.com/v1/users")
+            .header("Content-Type", "application/json")
+            .body(RequestBody::Json(serde_json::json!({"name": "test"})))
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("curl"));
+        assert!(curl.contains("-X POST"));
+        assert!(curl.contains("-H 'Content-Type: application/json'"));
+        assert!(curl.contains("-d"));
+        assert!(curl.contains("'https://api.example.com/v1/users'"));
+    }
+
+    #[test]
+    fn test_request_to_curl_with_multiple_headers() {
+        let request = RequestBuilder::new()
+            .url("https://example.com")
+            .header("Accept", "application/json")
+            .header("Authorization", "Bearer token123")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("-H 'Accept: application/json'"));
+        assert!(curl.contains("-H 'Authorization: Bearer token123'"));
+    }
+
+    #[test]
+    fn test_request_to_curl_put_form() {
+        let request = RequestBuilder::new()
+            .method(Method::Put)
+            .url("https://example.com/api")
+            .body(RequestBody::Form(vec![
+                ("status".to_string(), "active".to_string()),
+                ("role".to_string(), "admin".to_string()),
+            ]))
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("-X PUT"));
+        assert!(curl.contains("-d"));
+        assert!(curl.contains("status=active"));
+        assert!(curl.contains("role=admin"));
+    }
+
+    #[test]
+    fn test_request_to_curl_delete() {
+        let request = RequestBuilder::new()
+            .method(Method::Delete)
+            .url("https://api.example.com/v1/users/123")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("-X DELETE"));
+        assert!(curl.contains("'https://api.example.com/v1/users/123'"));
+    }
+
+    // 13.3: Curl command validation (round-trip)
+    #[test]
+    fn test_round_trip_get() {
+        let original = RequestBuilder::new()
+            .url("https://example.com")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&original);
+        let parsed = parse_curl(&curl).unwrap();
+        assert_eq!(parsed.method, original.method);
+        assert_eq!(parsed.url.as_str(), original.url.as_str());
+    }
+
+    #[test]
+    fn test_round_trip_post_json() {
+        let original = RequestBuilder::new()
+            .method(Method::Post)
+            .url("https://api.example.com/v1/users")
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .body(RequestBody::Json(serde_json::json!({"key": "value"})))
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&original);
+        let parsed = parse_curl(&curl).unwrap();
+        assert_eq!(parsed.method, original.method);
+        assert_eq!(parsed.url.as_str(), original.url.as_str());
+        assert_eq!(parsed.headers.get("Content-Type"), Some("application/json"));
+        assert_eq!(parsed.headers.get("Accept"), Some("application/json"));
+    }
+
+    #[test]
+    fn test_round_trip_put_form() {
+        let original = RequestBuilder::new()
+            .method(Method::Put)
+            .url("https://example.com/api")
+            .body(RequestBody::Form(vec![
+                ("name".to_string(), "john".to_string()),
+                ("age".to_string(), "30".to_string()),
+            ]))
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&original);
+        let parsed = parse_curl(&curl).unwrap();
+        assert_eq!(parsed.method, original.method);
+        match &parsed.body {
+            RequestBody::Form(pairs) => {
+                assert!(pairs.contains(&("name".to_string(), "john".to_string())));
+                assert!(pairs.contains(&("age".to_string(), "30".to_string())));
+            }
+            _ => panic!("Expected Form body after round-trip"),
+        }
+    }
+
+    // 13.4: Special character escaping in curl output
+    #[test]
+    fn test_shell_escape_no_special_chars() {
+        assert_eq!(shell_escape("hello"), "'hello'");
+        assert_eq!(shell_escape("hello world"), "'hello world'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_single_quote() {
+        assert_eq!(shell_escape("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_double_quote() {
+        assert_eq!(shell_escape("say \"hi\""), "'say \"hi\"'");
+    }
+
+    #[test]
+    fn test_shell_escape_complex_string() {
+        let input = "test'with\"quotes\\and\\backslashes";
+        let escaped = shell_escape(input);
+        assert!(escaped.starts_with('\''));
+        assert!(escaped.ends_with('\''));
+    }
+
+    #[test]
+    fn test_request_to_curl_with_special_chars_in_header() {
+        let request = RequestBuilder::new()
+            .url("https://example.com")
+            .header("X-Custom", "value with 'quotes'")
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("-H"));
+        assert!(curl.contains("value with"));
+    }
+
+    #[test]
+    fn test_request_to_curl_with_special_chars_in_body() {
+        let request = RequestBuilder::new()
+            .method(Method::Post)
+            .url("https://example.com")
+            .body(RequestBody::Raw("it's a test".to_string()))
+            .build()
+            .unwrap();
+        let curl = request_to_curl(&request);
+        assert!(curl.contains("-d"));
+        assert!(curl.contains("it'\\''s a test"));
     }
 }
