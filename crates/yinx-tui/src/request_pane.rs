@@ -1912,6 +1912,41 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_backspace_empty_url_buffer_returns_true() {
+        let mut pane = RequestPane::new();
+        pane.url_buffer = InputBuffer::new();
+        pane.focused_field = FocusedField::Url;
+
+        let result = pane.handle_key(KeyCode::Backspace, KeyModifiers::NONE);
+
+        assert!(result);
+        assert_eq!(pane.focused_field, FocusedField::Url);
+    }
+
+    #[test]
+    fn test_left_arrow_at_start_moves_to_method() {
+        let mut pane = RequestPane::new();
+        pane.url_buffer = InputBuffer::with_content("hello");
+        pane.url_buffer.cursor_pos = 0;
+        pane.focused_field = FocusedField::Url;
+
+        pane.handle_key(KeyCode::Left, KeyModifiers::NONE);
+
+        assert_eq!(pane.focused_field, FocusedField::Method);
+    }
+
+    #[test]
+    fn test_up_arrow_empty_url_moves_to_method() {
+        let mut pane = RequestPane::new();
+        pane.url_buffer = InputBuffer::new();
+        pane.focused_field = FocusedField::Url;
+
+        pane.handle_key(KeyCode::Up, KeyModifiers::NONE);
+
+        assert_eq!(pane.focused_field, FocusedField::Method);
+    }
+
+    #[test]
     fn test_request_pane_new() {
         let pane = RequestPane::new();
         assert_eq!(pane.method(), Method::Get);
