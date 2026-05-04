@@ -2419,4 +2419,47 @@ mod tests {
         assert_eq!(request.body, RequestBody::None);
         assert_eq!(request.headers.get("Content-Type"), None);
     }
+
+    // Issue 3: Method Dropdown - Task 3.1
+    #[test]
+    fn test_enter_with_method_popup_selects_and_closes() {
+        let mut pane = RequestPane::new();
+        pane.method_popup_visible = true;
+        pane.method_list_state.select(Some(1)); // POST is at index 1
+        pane.focused_field = FocusedField::Method;
+
+        let result = pane.handle_key(KeyCode::Enter, KeyModifiers::NONE);
+
+        assert!(result);
+        assert!(!pane.method_popup_visible);
+        assert_eq!(pane.method, Method::Post);
+    }
+
+    // Task 3.2
+    #[test]
+    fn test_method_popup_blocks_other_key_handling() {
+        let mut pane = RequestPane::new();
+        pane.method_popup_visible = true;
+        pane.focused_field = FocusedField::Method;
+
+        // Left arrow should NOT move focus while popup is open
+        let result = pane.handle_key(KeyCode::Left, KeyModifiers::NONE);
+
+        assert!(result); // consumed
+        assert_eq!(pane.focused_field, FocusedField::Method); // didn't change
+    }
+
+    // Task 3.3
+    #[test]
+    fn test_up_down_navigates_method_list() {
+        let mut pane = RequestPane::new();
+        pane.method_popup_visible = true;
+        pane.method_list_state.select(Some(0));
+
+        pane.handle_key(KeyCode::Down, KeyModifiers::NONE);
+        assert_eq!(pane.method_list_state.selected(), Some(1));
+
+        pane.handle_key(KeyCode::Up, KeyModifiers::NONE);
+        assert_eq!(pane.method_list_state.selected(), Some(0));
+    }
 }
