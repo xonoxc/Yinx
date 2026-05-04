@@ -10,7 +10,7 @@ use crossterm::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Terminal as RatatuiTerminal;
@@ -327,7 +327,11 @@ impl TuiShell {
 
     fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
-        let background = Block::default().style(Style::default().bg(self.theme.background.as_color()));
+        let bg_color = self.theme.background
+            .as_ref()
+            .map(|c| c.as_color())
+            .unwrap_or(Color::Reset);
+        let background = Block::default().style(Style::default().bg(bg_color));
         frame.render_widget(background, area);
 
         let pane_rects = self.layout.calculate();
@@ -390,7 +394,7 @@ impl TuiShell {
             .title("Response")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(self.theme.pane.background.as_color()));
+            .style(Style::default().bg(self.theme.pane.bg_color()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
 

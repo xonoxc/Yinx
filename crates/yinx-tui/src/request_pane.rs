@@ -1207,7 +1207,7 @@ impl RequestPane {
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(theme.pane.background.as_color()));
+            .style(Style::default().bg(theme.pane.bg_color()));
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -1260,7 +1260,7 @@ impl RequestPane {
             } else {
                 Style::default().fg(theme.border.color.as_color())
             })
-            .style(Style::default().bg(theme.pane.background.as_color()));
+            .style(Style::default().bg(theme.pane.bg_color()));
 
         let method_para = Paragraph::new(Line::from(vec![
             Span::styled(method_text, method_style),
@@ -1316,7 +1316,7 @@ impl RequestPane {
                         },
                     )),
             )
-            .style(Style::default().bg(theme.pane.background.as_color()))
+            .style(Style::default().bg(theme.pane.bg_color()))
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
@@ -1396,7 +1396,7 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.background.as_color()))
+                .style(Style::default().bg(theme.pane.bg_color()))
                 .title("Headers (a=add, d=delete, ←→ to switch field)"),
         )
         .row_highlight_style(
@@ -1439,7 +1439,7 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.background.as_color())),
+                .style(Style::default().bg(theme.pane.bg_color())),
         );
 
         frame.render_widget(type_para, chunks[0]);
@@ -1507,7 +1507,7 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.background.as_color()))
+                .style(Style::default().bg(theme.pane.bg_color()))
                 .title("Authentication"),
         );
 
@@ -1520,7 +1520,7 @@ impl RequestPane {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(Style::default().fg(theme.border.color.as_color()))
-                            .style(Style::default().bg(theme.pane.background.as_color())),
+                            .style(Style::default().bg(theme.pane.bg_color())),
                     )
                     .style(Style::default().fg(theme.foreground.as_color()));
                 frame.render_widget(para, chunks[1]);
@@ -1775,7 +1775,7 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.background.as_color()))
+                .style(Style::default().bg(theme.pane.bg_color()))
                 .title("Query Parameters (a=add, d=delete, ←→ to switch field)"),
         )
         .row_highlight_style(
@@ -1806,7 +1806,7 @@ impl RequestPane {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(theme.border.active_color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color())),
+                    .style(Style::default().bg(theme.pane.bg_color())),
             )
             .highlight_style(
                 Style::default()
@@ -1858,7 +1858,7 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.active_color.as_color()))
-                .style(Style::default().bg(theme.pane.background.as_color())),
+                .style(Style::default().bg(theme.pane.bg_color())),
         );
 
         frame.render_widget(list, popup_area);

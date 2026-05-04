@@ -7,7 +7,7 @@ use ratatui::style::Color;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
     pub name: String,
-    pub background: ColorDef,
+    pub background: Option<ColorDef>,
     pub foreground: ColorDef,
     pub border: BorderStyle,
     pub highlight: HighlightStyle,
@@ -16,60 +16,35 @@ pub struct Theme {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ColorDef {
-    pub r: u8,
-    pub g: u8,
-    pub b: u8,
+pub enum ColorDef {
+    Rgb(u8, u8, u8),
+    Reset,
 }
 
 impl ColorDef {
     pub fn as_color(&self) -> Color {
-        Color::Rgb(self.r, self.g, self.b)
+        match self {
+            ColorDef::Rgb(r, g, b) => Color::Rgb(*r, *g, *b),
+            ColorDef::Reset => Color::Reset,
+        }
     }
 
     pub fn from_color(color: Color) -> Option<Self> {
         match color {
-            Color::Rgb(r, g, b) => Some(Self { r, g, b }),
+            Color::Rgb(r, g, b) => Some(Self::Rgb(r, g, b)),
+            Color::Reset => Some(Self::Reset),
             _ => None,
         }
     }
 
-    pub const BLACK: ColorDef = ColorDef { r: 0, g: 0, b: 0 };
-    pub const WHITE: ColorDef = ColorDef {
-        r: 255,
-        g: 255,
-        b: 255,
-    };
-    pub const RED: ColorDef = ColorDef {
-        r: 220,
-        g: 50,
-        b: 47,
-    };
-    pub const GREEN: ColorDef = ColorDef {
-        r: 80,
-        g: 200,
-        b: 120,
-    };
-    pub const YELLOW: ColorDef = ColorDef {
-        r: 255,
-        g: 184,
-        b: 108,
-    };
-    pub const BLUE: ColorDef = ColorDef {
-        r: 97,
-        g: 175,
-        b: 239,
-    };
-    pub const MAGENTA: ColorDef = ColorDef {
-        r: 198,
-        g: 120,
-        b: 221,
-    };
-    pub const CYAN: ColorDef = ColorDef {
-        r: 86,
-        g: 182,
-        b: 194,
-    };
+    pub const BLACK: ColorDef = ColorDef::Rgb(0, 0, 0);
+    pub const WHITE: ColorDef = ColorDef::Rgb(255, 255, 255);
+    pub const RED: ColorDef = ColorDef::Rgb(220, 50, 47);
+    pub const GREEN: ColorDef = ColorDef::Rgb(80, 200, 120);
+    pub const YELLOW: ColorDef = ColorDef::Rgb(255, 184, 108);
+    pub const BLUE: ColorDef = ColorDef::Rgb(97, 175, 239);
+    pub const MAGENTA: ColorDef = ColorDef::Rgb(198, 120, 221);
+    pub const CYAN: ColorDef = ColorDef::Rgb(86, 182, 194);
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -105,42 +80,35 @@ pub struct SemanticColors {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaneColors {
-    pub background: ColorDef,
+    pub background: Option<ColorDef>,
     pub title: ColorDef,
     pub status_bar_bg: ColorDef,
     pub status_bar_fg: ColorDef,
 }
 
+impl PaneColors {
+    pub fn bg_color(&self) -> Color {
+        self.background
+            .as_ref()
+            .map(|c| c.as_color())
+            .unwrap_or(Color::Reset)
+    }
+}
+
 impl Theme {
-    pub fn dark() -> Self {
+    pub fn terminal_default() -> Self {
         Self {
-            name: "dark".to_string(),
-            background: ColorDef::BLACK,
-            foreground: ColorDef {
-                r: 220,
-                g: 220,
-                b: 220,
-            },
+            name: "terminal_default".to_string(),
+            background: None,
+            foreground: ColorDef::Rgb(220, 220, 220),
             border: BorderStyle {
-                color: ColorDef {
-                    r: 60,
-                    g: 60,
-                    b: 60,
-                },
+                color: ColorDef::Rgb(60, 60, 60),
                 active_color: ColorDef::BLUE,
                 style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
-                bg: ColorDef {
-                    r: 40,
-                    g: 44,
-                    b: 52,
-                },
-                fg: ColorDef {
-                    r: 220,
-                    g: 220,
-                    b: 220,
-                },
+                bg: ColorDef::Rgb(40, 44, 52),
+                fg: ColorDef::Rgb(220, 220, 220),
                 selected_bg: ColorDef::BLUE,
                 selected_fg: ColorDef::WHITE,
             },
@@ -151,17 +119,40 @@ impl Theme {
                 info: ColorDef::BLUE,
             },
             pane: PaneColors {
-                background: ColorDef {
-                    r: 20,
-                    g: 20,
-                    b: 30,
-                },
+                background: None,
                 title: ColorDef::CYAN,
-                status_bar_bg: ColorDef {
-                    r: 40,
-                    g: 44,
-                    b: 52,
-                },
+                status_bar_bg: ColorDef::Rgb(40, 44, 52),
+                status_bar_fg: ColorDef::WHITE,
+            },
+        }
+    }
+
+    pub fn dark() -> Self {
+        Self {
+            name: "dark".to_string(),
+            background: Some(ColorDef::BLACK),
+            foreground: ColorDef::Rgb(220, 220, 220),
+            border: BorderStyle {
+                color: ColorDef::Rgb(60, 60, 60),
+                active_color: ColorDef::BLUE,
+                style: BorderType::Rounded,
+            },
+            highlight: HighlightStyle {
+                bg: ColorDef::Rgb(40, 44, 52),
+                fg: ColorDef::Rgb(220, 220, 220),
+                selected_bg: ColorDef::BLUE,
+                selected_fg: ColorDef::WHITE,
+            },
+            semantic: SemanticColors {
+                success: ColorDef::GREEN,
+                error: ColorDef::RED,
+                warning: ColorDef::YELLOW,
+                info: ColorDef::BLUE,
+            },
+            pane: PaneColors {
+                background: Some(ColorDef::Rgb(20, 20, 30)),
+                title: ColorDef::CYAN,
+                status_bar_bg: ColorDef::Rgb(40, 44, 52),
                 status_bar_fg: ColorDef::WHITE,
             },
         }
@@ -170,86 +161,30 @@ impl Theme {
     pub fn light() -> Self {
         Self {
             name: "light".to_string(),
-            background: ColorDef {
-                r: 240,
-                g: 240,
-                b: 240,
-            },
-            foreground: ColorDef {
-                r: 30,
-                g: 30,
-                b: 30,
-            },
+            background: Some(ColorDef::Rgb(240, 240, 240)),
+            foreground: ColorDef::Rgb(30, 30, 30),
             border: BorderStyle {
-                color: ColorDef {
-                    r: 180,
-                    g: 180,
-                    b: 180,
-                },
-                active_color: ColorDef {
-                    r: 50,
-                    g: 100,
-                    b: 200,
-                },
+                color: ColorDef::Rgb(180, 180, 180),
+                active_color: ColorDef::Rgb(50, 100, 200),
                 style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
-                bg: ColorDef {
-                    r: 220,
-                    g: 220,
-                    b: 220,
-                },
-                fg: ColorDef {
-                    r: 30,
-                    g: 30,
-                    b: 30,
-                },
-                selected_bg: ColorDef {
-                    r: 50,
-                    g: 100,
-                    b: 200,
-                },
+                bg: ColorDef::Rgb(220, 220, 220),
+                fg: ColorDef::Rgb(30, 30, 30),
+                selected_bg: ColorDef::Rgb(50, 100, 200),
                 selected_fg: ColorDef::WHITE,
             },
             semantic: SemanticColors {
-                success: ColorDef {
-                    r: 0,
-                    g: 150,
-                    b: 50,
-                },
-                error: ColorDef { r: 200, g: 0, b: 0 },
-                warning: ColorDef {
-                    r: 200,
-                    g: 150,
-                    b: 0,
-                },
-                info: ColorDef {
-                    r: 0,
-                    g: 100,
-                    b: 200,
-                },
+                success: ColorDef::Rgb(0, 150, 50),
+                error: ColorDef::Rgb(200, 0, 0),
+                warning: ColorDef::Rgb(200, 150, 0),
+                info: ColorDef::Rgb(0, 100, 200),
             },
             pane: PaneColors {
-                background: ColorDef {
-                    r: 250,
-                    g: 250,
-                    b: 250,
-                },
-                title: ColorDef {
-                    r: 50,
-                    g: 100,
-                    b: 200,
-                },
-                status_bar_bg: ColorDef {
-                    r: 220,
-                    g: 220,
-                    b: 220,
-                },
-                status_bar_fg: ColorDef {
-                    r: 30,
-                    g: 30,
-                    b: 30,
-                },
+                background: Some(ColorDef::Rgb(250, 250, 250)),
+                title: ColorDef::Rgb(50, 100, 200),
+                status_bar_bg: ColorDef::Rgb(220, 220, 220),
+                status_bar_fg: ColorDef::Rgb(30, 30, 30),
             },
         }
     }
@@ -293,60 +228,111 @@ mod tests {
     fn test_default_dark_theme() {
         let theme = Theme::dark();
         assert_eq!(theme.name, "dark");
-        assert_eq!(theme.background.r, 0);
-        assert_eq!(theme.background.g, 0);
-        assert_eq!(theme.background.b, 0);
+        match theme.background {
+            Some(ColorDef::Rgb(r, g, b)) => {
+                assert_eq!(r, 0);
+                assert_eq!(g, 0);
+                assert_eq!(b, 0);
+            }
+            _ => panic!("Expected Some(Rgb) variant"),
+        }
     }
 
     #[test]
     fn test_dark_theme_semantic_colors() {
         let theme = Theme::dark();
-        assert_eq!(theme.semantic.success.g, 200);
-        assert_eq!(theme.semantic.error.r, 220);
-        assert_eq!(theme.semantic.warning.r, 255);
-        assert_eq!(theme.semantic.info.r, 97);
+        match theme.semantic.success {
+            ColorDef::Rgb(_, g, _) => assert_eq!(g, 200),
+            _ => panic!("Expected Rgb"),
+        }
+        match theme.semantic.error {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 220),
+            _ => panic!("Expected Rgb"),
+        }
+        match theme.semantic.warning {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 255),
+            _ => panic!("Expected Rgb"),
+        }
+        match theme.semantic.info {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 97),
+            _ => panic!("Expected Rgb"),
+        }
     }
 
     #[test]
     fn test_light_theme() {
         let theme = Theme::light();
         assert_eq!(theme.name, "light");
-        assert_eq!(theme.background.r, 240);
-        assert_eq!(theme.background.r, theme.background.g);
+        match theme.background {
+            Some(ColorDef::Rgb(r, g, _)) => {
+                assert_eq!(r, 240);
+                assert_eq!(r, g);
+            }
+            _ => panic!("Expected Some(Rgb)"),
+        }
     }
 
     #[test]
     fn test_light_theme_semantic_colors() {
         let theme = Theme::light();
-        assert_eq!(theme.semantic.success.r, 0);
-        assert_eq!(theme.semantic.success.g, 150);
-        assert_eq!(theme.semantic.error.r, 200);
-        assert_eq!(theme.semantic.warning.r, 200);
+        match theme.semantic.success {
+            ColorDef::Rgb(r, g, _) => {
+                assert_eq!(r, 0);
+                assert_eq!(g, 150);
+            }
+            _ => panic!("Expected Rgb"),
+        }
+        match theme.semantic.error {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 200),
+            _ => panic!("Expected Rgb"),
+        }
+        match theme.semantic.warning {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 200),
+            _ => panic!("Expected Rgb"),
+        }
     }
 
     #[test]
     fn test_theme_border_styles() {
         let dark = Theme::dark();
         assert_eq!(dark.border.style, BorderType::Rounded);
-        assert_eq!(dark.border.color.r, 60);
+        match dark.border.color {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 60),
+            _ => panic!("Expected Rgb"),
+        }
 
         let light = Theme::light();
         assert_eq!(light.border.style, BorderType::Rounded);
-        assert_eq!(light.border.active_color.r, 50);
+        match light.border.active_color {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 50),
+            _ => panic!("Expected Rgb"),
+        }
     }
 
     #[test]
     fn test_theme_highlight_colors() {
         let theme = Theme::dark();
-        assert_eq!(theme.highlight.selected_bg.r, 97);
-        assert_eq!(theme.highlight.selected_fg.r, 255);
+        match theme.highlight.selected_bg {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 97),
+            _ => panic!("Expected Rgb"),
+        }
+        match theme.highlight.selected_fg {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 255),
+            _ => panic!("Expected Rgb"),
+        }
     }
 
     #[test]
     fn test_theme_pane_colors() {
         let theme = Theme::dark();
-        assert_eq!(theme.pane.title.r, 86);
-        assert_eq!(theme.pane.status_bar_bg.r, 40);
+        match theme.pane.title {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 86),
+            _ => panic!("Expected Rgb"),
+        }
+        match theme.pane.status_bar_bg {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 40),
+            _ => panic!("Expected Rgb"),
+        }
     }
 
     #[test]
@@ -365,12 +351,34 @@ mod tests {
 
     #[test]
     fn test_color_def_constants() {
-        assert_eq!(ColorDef::BLACK.r, 0);
-        assert_eq!(ColorDef::WHITE.r, 255);
-        assert_eq!(ColorDef::GREEN.g, 200);
-        assert_eq!(ColorDef::BLUE.r, 97);
-        assert_eq!(ColorDef::MAGENTA.r, 198);
-        assert_eq!(ColorDef::CYAN.r, 86);
+        match ColorDef::BLACK {
+            ColorDef::Rgb(r, g, b) => {
+                assert_eq!(r, 0);
+                assert_eq!(g, 0);
+                assert_eq!(b, 0);
+            }
+            _ => panic!("Expected Rgb"),
+        }
+        match ColorDef::WHITE {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 255),
+            _ => panic!("Expected Rgb"),
+        }
+        match ColorDef::GREEN {
+            ColorDef::Rgb(_, g, _) => assert_eq!(g, 200),
+            _ => panic!("Expected Rgb"),
+        }
+        match ColorDef::BLUE {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 97),
+            _ => panic!("Expected Rgb"),
+        }
+        match ColorDef::MAGENTA {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 198),
+            _ => panic!("Expected Rgb"),
+        }
+        match ColorDef::CYAN {
+            ColorDef::Rgb(r, _, _) => assert_eq!(r, 86),
+            _ => panic!("Expected Rgb"),
+        }
     }
 
     #[test]
@@ -426,100 +434,39 @@ mod tests {
     fn test_theme_with_custom_colors() {
         let theme = Theme {
             name: "custom".to_string(),
-            background: ColorDef {
-                r: 10,
-                g: 20,
-                b: 30,
-            },
-            foreground: ColorDef {
-                r: 200,
-                g: 210,
-                b: 220,
-            },
+            background: Some(ColorDef::Rgb(10, 20, 30)),
+            foreground: ColorDef::Rgb(200, 210, 220),
             border: BorderStyle {
-                color: ColorDef {
-                    r: 50,
-                    g: 50,
-                    b: 50,
-                },
-                active_color: ColorDef {
-                    r: 100,
-                    g: 150,
-                    b: 200,
-                },
+                color: ColorDef::Rgb(50, 50, 50),
+                active_color: ColorDef::Rgb(100, 150, 200),
                 style: BorderType::Double,
             },
             highlight: HighlightStyle {
-                bg: ColorDef {
-                    r: 30,
-                    g: 30,
-                    b: 30,
-                },
-                fg: ColorDef {
-                    r: 200,
-                    g: 200,
-                    b: 200,
-                },
-                selected_bg: ColorDef {
-                    r: 80,
-                    g: 100,
-                    b: 180,
-                },
-                selected_fg: ColorDef {
-                    r: 255,
-                    g: 255,
-                    b: 255,
-                },
+                bg: ColorDef::Rgb(30, 30, 30),
+                fg: ColorDef::Rgb(200, 200, 200),
+                selected_bg: ColorDef::Rgb(80, 100, 180),
+                selected_fg: ColorDef::Rgb(255, 255, 255),
             },
             semantic: SemanticColors {
-                success: ColorDef {
-                    r: 50,
-                    g: 180,
-                    b: 50,
-                },
-                error: ColorDef {
-                    r: 200,
-                    g: 30,
-                    b: 30,
-                },
-                warning: ColorDef {
-                    r: 220,
-                    g: 160,
-                    b: 30,
-                },
-                info: ColorDef {
-                    r: 30,
-                    g: 80,
-                    b: 200,
-                },
+                success: ColorDef::Rgb(50, 180, 50),
+                error: ColorDef::Rgb(200, 30, 30),
+                warning: ColorDef::Rgb(220, 160, 30),
+                info: ColorDef::Rgb(30, 80, 200),
             },
             pane: PaneColors {
-                background: ColorDef {
-                    r: 15,
-                    g: 15,
-                    b: 25,
-                },
-                title: ColorDef {
-                    r: 100,
-                    g: 150,
-                    b: 200,
-                },
-                status_bar_bg: ColorDef {
-                    r: 30,
-                    g: 30,
-                    b: 30,
-                },
-                status_bar_fg: ColorDef {
-                    r: 200,
-                    g: 200,
-                    b: 200,
-                },
+                background: Some(ColorDef::Rgb(15, 15, 25)),
+                title: ColorDef::Rgb(100, 150, 200),
+                status_bar_bg: ColorDef::Rgb(30, 30, 30),
+                status_bar_fg: ColorDef::Rgb(200, 200, 200),
             },
         };
 
         assert_eq!(theme.name, "custom");
         assert_eq!(theme.border.style, BorderType::Double);
-        assert_eq!(theme.semantic.success.g, 180);
+        match theme.semantic.success {
+            ColorDef::Rgb(_, g, _) => assert_eq!(g, 180),
+            _ => panic!("Expected Rgb"),
+        }
     }
 
     #[test]
@@ -534,5 +481,59 @@ mod tests {
     fn test_theme_error_display() {
         let err = ThemeError::NotFound("test".to_string());
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn test_color_def_reset_variant() {
+        let reset = ColorDef::Reset;
+        let color = reset.as_color();
+        assert_eq!(color, Color::Reset);
+    }
+
+    #[test]
+    fn test_color_def_black_is_rgb() {
+        match ColorDef::BLACK {
+            ColorDef::Rgb(r, g, b) => {
+                assert_eq!(r, 0);
+                assert_eq!(g, 0);
+                assert_eq!(b, 0);
+            }
+            _ => panic!("BLACK should be Rgb variant"),
+        }
+    }
+
+    #[test]
+    fn test_terminal_default_theme_has_no_background() {
+        let theme = Theme::terminal_default();
+        assert!(theme.background.is_none());
+    }
+
+    #[test]
+    fn test_dark_theme_background_is_some_black() {
+        let theme = Theme::dark();
+        match theme.background {
+            Some(ColorDef::Rgb(0, 0, 0)) => (),
+            _ => panic!("Dark theme should have black background"),
+        }
+    }
+
+    #[test]
+    fn test_background_style_uses_reset_when_none() {
+        let theme = Theme::terminal_default();
+        let bg_color = theme.background
+            .as_ref()
+            .map(|c| c.as_color())
+            .unwrap_or(Color::Reset);
+        assert_eq!(bg_color, Color::Reset);
+    }
+
+    #[test]
+    fn test_pane_background_optional() {
+        let theme = Theme::terminal_default();
+        let pane_bg = theme.pane.background
+            .as_ref()
+            .map(|c| c.as_color())
+            .unwrap_or(Color::Reset);
+        assert_eq!(pane_bg, Color::Reset);
     }
 }

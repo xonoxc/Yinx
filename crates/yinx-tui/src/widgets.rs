@@ -65,7 +65,7 @@ impl<'a> Panel<'a> {
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(theme.pane.background.as_color()));
+            .style(Style::default().bg(theme.pane.bg_color()));
 
         frame.render_widget(block, area);
     }
@@ -122,12 +122,12 @@ impl<'a> ScrollableList<'a> {
                 .title(title)
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.background.as_color()))
+                .style(Style::default().bg(theme.pane.bg_color()))
         } else {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.background.as_color()))
+                .style(Style::default().bg(theme.pane.bg_color()))
         };
 
         let list = list.block(block);
@@ -212,7 +212,7 @@ impl<'a> TableWidget<'a> {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color())),
+                    .style(Style::default().bg(theme.pane.bg_color())),
             )
             .row_highlight_style(
                 Style::default()
@@ -262,7 +262,7 @@ impl<'a> TabsWidget<'a> {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color())),
             )
-            .style(Style::default().bg(theme.pane.background.as_color()))
+            .style(Style::default().bg(theme.pane.bg_color()))
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
@@ -598,7 +598,7 @@ impl TimelineWidget {
                     .title(self.title.as_str())
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color())),
+                    .style(Style::default().bg(theme.pane.bg_color())),
             )
             .style(Style::default().fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: true });
@@ -651,7 +651,7 @@ impl<'a> Modal<'a> {
             .border_style(Style::default().fg(theme.border.active_color.as_color()))
             .style(
                 Style::default()
-                    .bg(theme.pane.background.as_color())
+                    .bg(theme.pane.bg_color())
                     .fg(theme.foreground.as_color()),
             );
 
@@ -902,7 +902,7 @@ mod tests {
     #[test]
     fn test_theme_dark_has_colors() {
         let theme = Theme::dark();
-        let _ = theme.background.as_color();
+        let _ = theme.background.map(|c| c.as_color());
         let _ = theme.foreground.as_color();
         let _ = theme.border.color.as_color();
         let _ = theme.highlight.selected_bg.as_color();

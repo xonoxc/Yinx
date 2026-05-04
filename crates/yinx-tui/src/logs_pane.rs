@@ -397,7 +397,7 @@ impl LogsPane {
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(theme.pane.background.as_color()));
+            .style(Style::default().bg(theme.pane.bg_color()));
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -424,7 +424,7 @@ impl LogsPane {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color())),
             )
-            .style(Style::default().bg(theme.pane.background.as_color()))
+            .style(Style::default().bg(theme.pane.bg_color()))
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
@@ -491,7 +491,7 @@ impl LogsPane {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color())),
+                    .style(Style::default().bg(theme.pane.bg_color())),
             )
             .highlight_style(
                 Style::default()
@@ -746,7 +746,7 @@ impl LogsPane {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color())),
+                    .style(Style::default().bg(theme.pane.bg_color())),
             )
             .wrap(Wrap { trim: true });
 
@@ -788,14 +788,14 @@ impl LogsPane {
                         .title("Request Duration Histogram (ms)")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.background.as_color())),
+                        .style(Style::default().bg(theme.pane.bg_color())),
                 )
                 .bar_width(8)
                 .bar_gap(1)
                 .bar_style(Style::default().fg(theme.semantic.info.as_color()))
                 .value_style(
                     Style::default()
-                        .fg(theme.pane.background.as_color())
+                        .fg(theme.pane.bg_color())
                         .bg(theme.semantic.info.as_color()),
                 )
                 .data(&bar_data);
@@ -833,14 +833,14 @@ impl LogsPane {
                         .title("Chunk Interval Histogram (ms)")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.background.as_color())),
+                        .style(Style::default().bg(theme.pane.bg_color())),
                 )
                 .bar_width(8)
                 .bar_gap(1)
                 .bar_style(Style::default().fg(theme.semantic.info.as_color()))
                 .value_style(
                     Style::default()
-                        .fg(theme.pane.background.as_color())
+                        .fg(theme.pane.bg_color())
                         .bg(theme.semantic.info.as_color()),
                 )
                 .data(&bar_data);
@@ -854,7 +854,7 @@ impl LogsPane {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(Style::default().fg(theme.border.color.as_color()))
-                            .style(Style::default().bg(theme.pane.background.as_color())),
+                            .style(Style::default().bg(theme.pane.bg_color())),
                     )
                     .alignment(Alignment::Center);
 
@@ -873,7 +873,7 @@ impl LogsPane {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(Style::default().fg(theme.border.color.as_color()))
-                            .style(Style::default().bg(theme.pane.background.as_color())),
+                            .style(Style::default().bg(theme.pane.bg_color())),
                     )
                     .alignment(Alignment::Center);
 
@@ -897,14 +897,14 @@ impl LogsPane {
                         .title("Status Code Distribution")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.background.as_color())),
+                        .style(Style::default().bg(theme.pane.bg_color())),
                 )
                 .bar_width(8)
                 .bar_gap(1)
                 .bar_style(Style::default().fg(theme.semantic.info.as_color()))
                 .value_style(
                     Style::default()
-                        .fg(theme.pane.background.as_color())
+                        .fg(theme.pane.bg_color())
                         .bg(theme.semantic.info.as_color()),
                 )
                 .data(&bar_data);
@@ -924,7 +924,7 @@ impl LogsPane {
                     Block::default()
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.background.as_color())),
+                        .style(Style::default().bg(theme.pane.bg_color())),
                 )
                 .alignment(Alignment::Center);
 
@@ -972,7 +972,7 @@ impl LogsPane {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.background.as_color())),
+                    .style(Style::default().bg(theme.pane.bg_color())),
             )
             .highlight_style(
                 Style::default()
@@ -1001,7 +1001,7 @@ impl LogsPane {
                         .title("Curl Equivalent")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.background.as_color())),
+                        .style(Style::default().bg(theme.pane.bg_color())),
                 )
                 .wrap(Wrap { trim: true });
             frame.render_widget(paragraph, area);
@@ -1013,7 +1013,7 @@ impl LogsPane {
                         .title("Curl Equivalent")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.background.as_color())),
+                        .style(Style::default().bg(theme.pane.bg_color())),
                 )
                 .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
