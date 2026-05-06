@@ -161,6 +161,7 @@ pub struct RequestPane {
     url_history: Vec<String>,
     url_autocomplete_visible: bool,
     url_autocomplete_selected: usize,
+    search_visible: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +217,7 @@ impl RequestPane {
             url_history: Vec::new(),
             url_autocomplete_visible: false,
             url_autocomplete_selected: 0,
+            search_visible: false,
         }
     }
 
@@ -669,13 +671,21 @@ impl RequestPane {
         Ok(())
     }
 
-    pub fn handle_key(&mut self, key_code: KeyCode, _modifiers: KeyModifiers) -> bool {
+    pub fn handle_key(&mut self, key_code: KeyCode, modifiers: KeyModifiers) -> bool {
         if self.method_popup_visible {
             return self.handle_method_popup_key(key_code);
         }
 
         if self.url_autocomplete_visible {
             return self.handle_autocomplete_key(key_code);
+        }
+
+        // Ctrl+F opens search in active tab content
+        if modifiers.contains(KeyModifiers::CONTROL) && key_code == KeyCode::Char('f') {
+            if self.focused_field == FocusedField::TabContent {
+                self.search_visible = true;
+                return true;
+            }
         }
 
         match self.focused_field {
@@ -2496,5 +2506,17 @@ mod tests {
 
         pane.handle_key(KeyCode::Up, KeyModifiers::NONE);
         assert_eq!(pane.method_list_state.selected(), Some(0));
+    }
+
+    // Task 9.2
+    #[test]
+    fn test_ctrl_f_opens_search() {
+        let mut pane = RequestPane::new();
+        pane.focused_field = FocusedField::TabContent;
+        
+        let result = pane.handle_key(KeyCode::Char('f'), KeyModifiers::CONTROL);
+        
+        assert!(pane.search_visible);
+        assert!(result);
     }
 }

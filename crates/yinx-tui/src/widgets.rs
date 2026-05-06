@@ -335,6 +335,11 @@ pub struct StatusBar<'a> {
     network_state: Option<&'a yinx_core::state::NetworkState>,
     cursor_line: usize,
     cursor_col: usize,
+    left: &'a str,
+    center: &'a str,
+    right: &'a str,
+    status_code: Option<u16>,
+    response_time_ms: Option<u128>,
 }
 
 impl<'a> StatusBar<'a> {
@@ -345,6 +350,11 @@ impl<'a> StatusBar<'a> {
             network_state: None,
             cursor_line: 0,
             cursor_col: 0,
+            left: "",
+            center: "",
+            right: "",
+            status_code: None,
+            response_time_ms: None,
         }
     }
 
@@ -362,6 +372,26 @@ impl<'a> StatusBar<'a> {
         self.cursor_line = line;
         self.cursor_col = col;
         self
+    }
+
+    pub fn with_left(mut self, left: &'a str) -> Self {
+        self.left = left;
+        self
+    }
+
+    pub fn with_center(mut self, center: &'a str) -> Self {
+        self.center = center;
+        self
+    }
+
+    pub fn with_right(mut self, right: &'a str) -> Self {
+        self.right = right;
+        self
+    }
+
+    pub fn set_response_info(&mut self, status: u16, time_ms: u128) {
+        self.status_code = Some(status);
+        self.response_time_ms = Some(time_ms);
     }
 
     fn mode_color(&self, theme: &Theme) -> ratatui::style::Color {
@@ -957,5 +987,33 @@ mod tests {
         assert!(markers.contains('F'));
         assert!(summary.contains("FINAL"));
         assert!(diff.contains('+'));
+    }
+
+    #[test]
+    fn test_status_bar_has_three_sections() {
+        let bar = StatusBar::new("NORMAL")
+            .with_left("Yinx")
+            .with_center("GET https://example.com")
+            .with_right("100ms");
+        
+        assert_eq!(bar.left, "Yinx");
+        assert_eq!(bar.center, "GET https://example.com");
+        assert_eq!(bar.right, "100ms");
+    }
+
+    #[test]
+    fn test_mode_pill_color_matches_mode() {
+        let bar = StatusBar::new("NORMAL");
+        let color = bar.mode_color(&Theme::dark());
+        assert_eq!(color, Theme::dark().semantic.info.as_color());
+    }
+
+    #[test]
+    fn test_statusline_shows_response_info() {
+        let mut bar = StatusBar::new("NORMAL");
+        bar.set_response_info(200, 150);
+        
+        assert_eq!(bar.status_code, Some(200));
+        assert_eq!(bar.response_time_ms, Some(150));
     }
 }

@@ -204,8 +204,35 @@ impl TuiShell {
                 self.layout.update_terminal_size(width, height);
                 Ok(())
             }
+            Event::Mouse(mouse_event) => {
+                self.handle_mouse_event(mouse_event);
+                Ok(())
+            }
             _ => Ok(()),
         }
+    }
+
+    fn handle_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
+        if mouse_event.kind != crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+            return;
+        }
+
+        let rects = self.layout.calculate();
+        
+        // Check which pane was clicked based on coordinates
+        if self.is_in_rect(mouse_event.column, mouse_event.row, rects.response) {
+            self.active_pane = ActivePane::Response;
+        } else if self.is_in_rect(mouse_event.column, mouse_event.row, rects.request) {
+            self.active_pane = ActivePane::Request;
+        } else if self.is_in_rect(mouse_event.column, mouse_event.row, rects.workflow) {
+            self.active_pane = ActivePane::Workflow;
+        } else if self.is_in_rect(mouse_event.column, mouse_event.row, rects.logs) {
+            self.active_pane = ActivePane::Logs;
+        }
+    }
+
+    fn is_in_rect(&self, col: u16, row: u16, rect: ratatui::layout::Rect) -> bool {
+        col >= rect.x && col < rect.x + rect.width && row >= rect.y && row < rect.y + rect.height
     }
 
     async fn handle_key(&mut self, key_event: KeyEvent) -> Result<(), AppError> {
@@ -950,5 +977,25 @@ mod tests {
          let key = KeyEvent::new(KeyCode::F(10), KeyModifiers::NONE);
          let events = handler.handle_key(key);
          assert!(events.iter().any(|e| matches!(e, AppEvent::ThemeChanged(_))));
+     }
+
+     #[test]
+     fn test_mouse_click_focuses_pane() {
+         let mut shell = TuiShell::new(80, 24);
+         let rects = shell.layout.calculate();
+         
+         // Click in the middle of Response pane
+         let row = rects.response.y + rects.response.height / 2;
+         let col = rects.response.x + rects.response.width / 2;
+         
+         let mouse_event = crossterm::event::MouseEvent {
+             kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+             column: col,
+             row,
+             modifiers: crossterm::event::KeyModifiers::NONE,
+         };
+         
+         shell.handle_mouse_event(mouse_event);
+         assert_eq!(shell.active_pane, ActivePane::Response);
      }
 }
