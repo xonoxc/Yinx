@@ -56,6 +56,7 @@ pub enum KeyAction {
     SendRequest,
     Save,
     Cancel,
+    CycleTheme,
     Unknown,
 }
 
@@ -85,6 +86,7 @@ impl fmt::Display for KeyAction {
             KeyAction::SendRequest => "send_request",
             KeyAction::Save => "save",
             KeyAction::Cancel => "cancel",
+            KeyAction::CycleTheme => "cycle_theme",
             KeyAction::Unknown => "unknown",
         };
         write!(f, "{}", s)
@@ -249,10 +251,13 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("Backspace", &[]), KeyAction::DeleteChar);
         bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::DeleteWord);
 
-        // Actions
-        bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
-        bindings.insert(KeyBinding::new("Enter", &[]), KeyAction::SendRequest);
-        bindings.insert(KeyBinding::new("c", &["Ctrl"]), KeyAction::Quit);
+         // Actions
+         bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
+         bindings.insert(KeyBinding::new("Enter", &[]), KeyAction::SendRequest);
+         bindings.insert(KeyBinding::new("c", &["Ctrl"]), KeyAction::Quit);
+         
+         // Theme cycling
+         bindings.insert(KeyBinding::new("F10", &[]), KeyAction::CycleTheme);
 
         Self { bindings }
     }
@@ -390,6 +395,9 @@ impl InputHandler {
             }
             KeyAction::Save => {
                 events.push(AppEvent::SaveState);
+            }
+            KeyAction::CycleTheme => {
+                events.push(AppEvent::ThemeChanged("next".to_string()));
             }
             _ => {
                 if let KeyCode::Char('g') = event.code {

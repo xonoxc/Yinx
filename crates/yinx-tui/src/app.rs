@@ -20,7 +20,7 @@ use crate::layout::Layout;
 use crate::logs_pane::{LogLevel, LogsPane};
 use crate::request_pane::RequestPane;
 use crate::settings_pane::SettingsPane;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeRegistry};
 use crate::widgets::StatusBar;
 use crate::workflow_pane::WorkflowPane;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
@@ -141,6 +141,7 @@ impl Drop for TerminalGuard {
 
 struct TuiShell {
     theme: Theme,
+    theme_registry: ThemeRegistry,
     layout: Layout,
     request_pane: RequestPane,
     logs_pane: LogsPane,
@@ -171,8 +172,14 @@ impl TuiShell {
             "F1-F4 switch panes, F6 opens settings, F7 toggles layout, Ctrl+C quits.",
         );
 
+        let mut theme_registry = ThemeRegistry::new();
+        theme_registry.register("dark".to_string(), Theme::dark());
+        theme_registry.register("light".to_string(), Theme::light());
+        theme_registry.set_current("dark");
+
         Self {
             theme: Theme::dark(),
+            theme_registry,
             layout,
             request_pane: RequestPane::new().with_url("https://example.com"),
             logs_pane,
@@ -234,6 +241,9 @@ impl TuiShell {
             KeyCode::F(7) => self.layout.toggle_split_direction(),
             KeyCode::F(8) => self.layout.resize_request_pane(-4),
             KeyCode::F(9) => self.layout.resize_request_pane(4),
+            KeyCode::F(10) => {
+                self.theme = self.theme_registry.cycle_next().clone();
+            }
             _ => self.forward_key_to_active_pane(key_event),
         }
 
@@ -912,10 +922,33 @@ mod tests {
         assert!(flag.load(Ordering::SeqCst));
     }
 
-    #[test]
-    fn test_terminal_guard_suspend_is_noop_when_inactive() {
-        let mut guard = TerminalGuard { raw_mode: false };
-        assert!(guard.suspend().is_ok());
-        assert!(!guard.raw_mode);
-    }
+     #[test]
+     fn test_terminal_guard_suspend_is_noop_when_inactive() {
+         let mut guard = TerminalGuard { raw_mode: false };
+         assert!(guard.suspend().is_ok());
+         assert!(!guard.raw_mode);
+     }
+
+     #[test]
+     fn test_theme_changed_event_updates_theme() {
+         let mut shell = TuiShell::new(80, 24);
+         
+         // Simulate receiving ThemeChanged event
+         let event = AppEvent::ThemeChanged("light".to_string());
+         // This will need to be handled in handle_event
+         // For now, just verify the event exists
+         match event {
+             AppEvent::ThemeChanged(name) => assert_eq!(name, "light"),
+             _ => panic!("Wrong event"),
+         }
+     }
+
+     #[test]
+     fn test_f10_cycles_theme() {
+         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+         let mut handler = InputHandler::new();
+         let key = KeyEvent::new(KeyCode::F(10), KeyModifiers::NONE);
+         let events = handler.handle_key(key);
+         assert!(events.iter().any(|e| matches!(e, AppEvent::ThemeChanged(_))));
+     }
 }

@@ -95,6 +95,59 @@ impl PaneColors {
     }
 }
 
+pub struct ThemeRegistry {
+    themes: std::collections::HashMap<String, Theme>,
+    current: String,
+}
+
+impl ThemeRegistry {
+    pub fn new() -> Self {
+        Self {
+            themes: std::collections::HashMap::new(),
+            current: String::new(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.themes.len()
+    }
+
+    pub fn register(&mut self, name: String, theme: Theme) {
+        self.themes.insert(name, theme);
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Theme> {
+        self.themes.get(name)
+    }
+
+    pub fn set_current(&mut self, name: &str) {
+        self.current = name.to_string();
+    }
+
+    pub fn current(&self) -> Option<&Theme> {
+        if self.current.is_empty() {
+            None
+        } else {
+            self.themes.get(&self.current)
+        }
+    }
+
+    pub fn cycle_next(&mut self) -> &Theme {
+        let keys: Vec<String> = self.themes.keys().cloned().collect();
+        if keys.is_empty() {
+            panic!("No themes registered");
+        }
+        if self.current.is_empty() {
+            self.current = keys[0].clone();
+        } else {
+            let current_idx = keys.iter().position(|k| k == &self.current).unwrap_or(0);
+            let next_idx = (current_idx + 1) % keys.len();
+            self.current = keys[next_idx].clone();
+        }
+        self.themes.get(&self.current).unwrap()
+    }
+}
+
 impl Theme {
     pub fn terminal_default() -> Self {
         Self {
@@ -535,5 +588,43 @@ mod tests {
             .map(|c| c.as_color())
             .unwrap_or(Color::Reset);
         assert_eq!(pane_bg, Color::Reset);
+    }
+
+    // Issue 6: Theme Switcher - Task 6.1
+    #[test]
+    fn test_theme_registry_new_is_empty() {
+        let registry = ThemeRegistry::new();
+        assert_eq!(registry.len(), 0);
+    }
+
+    // Task 6.2
+    #[test]
+    fn test_register_theme() {
+        let mut registry = ThemeRegistry::new();
+        let theme = Theme::dark();
+        registry.register("dark".to_string(), theme);
+        assert_eq!(registry.len(), 1);
+    }
+
+    // Task 6.3
+    #[test]
+    fn test_get_registered_theme() {
+        let mut registry = ThemeRegistry::new();
+        registry.register("dark".to_string(), Theme::dark());
+        
+        let theme = registry.get("dark").unwrap();
+        assert_eq!(theme.name, "dark");
+    }
+
+    // Task 6.4
+    #[test]
+    fn test_cycle_next_rotates_themes() {
+        let mut registry = ThemeRegistry::new();
+        registry.register("dark".to_string(), Theme::dark());
+        registry.register("light".to_string(), Theme::light());
+        registry.set_current("dark");
+        
+        let next = registry.cycle_next();
+        assert_eq!(next.name, "light");
     }
 }

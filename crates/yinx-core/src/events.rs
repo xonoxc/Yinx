@@ -50,6 +50,12 @@ pub enum AppEvent {
     SettingsChanged { key: String, value: String },
     SettingsSaved,
     SettingsClosed,
+
+    // Config events
+    ConfigChanged { key: String, value: String },
+
+    // Theme events
+    ThemeChanged(String),
 }
 
 pub struct EventBus {
@@ -228,6 +234,9 @@ impl StateReducer {
             }
             AppEvent::SettingsSaved => {}
             AppEvent::SettingsClosed => {}
+            AppEvent::ThemeChanged(_) => {
+                diff.app_state_changed = true;
+            }
         }
 
         diff
@@ -697,9 +706,18 @@ mod tests {
         assert!(!diff.any());
     }
 
-    #[tokio::test]
-    async fn test_event_bus_channel_size() {
-        let bus = EventBus::new(10);
-        assert_eq!(bus.channel_size(), 0);
-    }
+     #[tokio::test]
+     async fn test_event_bus_channel_size() {
+         let bus = EventBus::new(10);
+         assert_eq!(bus.channel_size(),0);
+     }
+
+     #[test]
+     fn test_theme_changed_event_has_name() {
+         let event = AppEvent::ThemeChanged("dark".to_string());
+         match event {
+             AppEvent::ThemeChanged(name) => assert_eq!(name, "dark"),
+             _ => panic!("Wrong event type"),
+         }
+     }
 }
