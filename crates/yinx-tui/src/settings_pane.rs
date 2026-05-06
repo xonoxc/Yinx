@@ -186,9 +186,10 @@ impl SettingsPane {
         self.mode = SettingsMode::Editing(self.selected_index);
     }
 
-    fn confirm_edit(&mut self, index: usize) {
+    fn confirm_edit(&mut self, index: usize) -> Vec<AppEvent> {
         let key = self.setting_key_at(index);
         let value = self.edit_buffer.clone();
+        let mut events = Vec::new();
 
         match key.as_str() {
             "theme" => {
@@ -215,13 +216,42 @@ impl SettingsPane {
                 }
             }
             _ => {
-                self.config.keybindings.insert(key, value);
+                self.config.keybindings.insert(key.clone(), value);
             }
         }
 
         self.mode = SettingsMode::Viewing;
         self.edit_buffer.clear();
         self.message = Some("Setting updated".to_string());
+        
+        events.push(AppEvent::ConfigChanged {
+            key: self.setting_key_at(index),
+            value: self.edit_buffer.clone(),
+        });
+        events
+    }
+
+    pub fn toggle_current_boolean(&mut self) {
+        let key = self.setting_key_at(self.selected_index);
+        match key.as_str() {
+            "follow_redirects" => {
+                self.config.defaults.follow_redirects = !self.config.defaults.follow_redirects;
+            }
+            "verify_tls" => {
+                self.config.defaults.verify_tls = !self.config.defaults.verify_tls;
+            }
+            _ => {}
+        }
+        self.message = Some("Setting toggled".to_string());
+    }
+
+    pub fn get_theme_list(&self) -> Vec<String> {
+        // Return available themes from config
+        vec!["dark".to_string(), "light".to_string()]
+    }
+
+    pub fn confirm_edit_and_get_events(&mut self, index: usize) -> Vec<AppEvent> {
+        self.confirm_edit(index)
     }
 
     fn save(&mut self) {
@@ -558,5 +588,44 @@ mod tests {
         pane.message = Some("test".to_string());
         pane.close();
         assert!(pane.message.is_none());
+    }
+
+    // Issue 4: Settings Redesign - Task 4.2
+    #[test]
+    fn test_toggle_boolean_setting() {
+        let mut pane = SettingsPane::new();
+        pane.open();
+        pane.selected_index = 2; // follow_redirects
+        pane.start_editing();
+        
+        // Simulate Space to toggle
+        pane.toggle_current_boolean();
+        
+        assert_ne!(pane.config.defaults.follow_redirects, Config::default_config().defaults.follow_redirects);
+    }
+
+    // Task 4.3
+    #[test]
+    fn test_theme_dropdown_lists_all_themes() {
+        let mut pane = SettingsPane::new();
+        pane.open();
+        pane.selected_index = 0; // theme
+        
+        let themes = pane.get_theme_list();
+        assert!(themes.contains(&"dark".to_string()));
+        assert!(themes.contains(&"light".to_string()));
+    }
+
+    // Task 4.4
+    #[test]
+    fn test_confirm_edit_emits_config_changed() {
+        let mut pane = SettingsPane::new();
+        pane.open();
+        pane.selected_index = 0;
+        pane.start_editing();
+        pane.edit_buffer = "light".to_string();
+        
+        let events = pane.confirm_edit_and_get_events(0);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::ConfigChanged { .. })));
     }
 }

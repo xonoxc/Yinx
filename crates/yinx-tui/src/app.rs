@@ -929,19 +929,19 @@ mod tests {
          assert!(!guard.raw_mode);
      }
 
-     #[test]
-     fn test_theme_changed_event_updates_theme() {
-         let mut shell = TuiShell::new(80, 24);
+    #[test]
+    fn test_theme_changed_event_updates_theme() {
+        let shell = TuiShell::new(80, 24);
          
-         // Simulate receiving ThemeChanged event
-         let event = AppEvent::ThemeChanged("light".to_string());
-         // This will need to be handled in handle_event
-         // For now, just verify the event exists
-         match event {
-             AppEvent::ThemeChanged(name) => assert_eq!(name, "light"),
-             _ => panic!("Wrong event"),
-         }
-     }
+        // Simulate receiving ThemeChanged event
+        let event = AppEvent::ThemeChanged("light".to_string());
+        // This will need to be handled in handle_event
+        // For now, just verify the event exists
+        match event {
+            AppEvent::ThemeChanged(name) => assert_eq!(name, "light"),
+            _ => panic!("Wrong event"),
+        }
+    }
 
      #[test]
      fn test_f10_cycles_theme() {

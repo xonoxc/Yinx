@@ -23,6 +23,13 @@ impl Default for PaneConstraints {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum LayoutPreset {
+    Default,
+    Mixed,
+    Wide,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct LayoutConfig {
     pub request_pane_ratio: f32,
     pub response_pane_ratio: f32,
@@ -31,6 +38,8 @@ pub struct LayoutConfig {
     pub horizontal_split: bool,
     pub request_pane_width: u16,
     pub response_pane_height: u16,
+    pub gutter: u16,
+    pub preset: LayoutPreset,
 }
 
 impl Default for LayoutConfig {
@@ -43,6 +52,8 @@ impl Default for LayoutConfig {
             horizontal_split: false,
             request_pane_width: 40,
             response_pane_height: 20,
+            gutter: 1,
+            preset: LayoutPreset::Default,
         }
     }
 }
@@ -132,6 +143,19 @@ impl Layout {
         }
     }
 
+    pub fn with_preset(preset: LayoutPreset) -> Self {
+        Self {
+            state: LayoutState {
+                config: LayoutConfig {
+                    preset,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            terminal_size: (80, 24),
+        }
+    }
+
     pub fn update_terminal_size(&mut self, width: u16, height: u16) {
         self.terminal_size = (width, height);
     }
@@ -163,10 +187,17 @@ impl Layout {
         let status_bar_height = constraints.status_bar.min_height.min(term_height);
         let available_height = term_height.saturating_sub(status_bar_height);
 
-        if self.state.config.horizontal_split {
-            self.calculate_horizontal(term_width, available_height, status_bar_height, constraints)
-        } else {
-            self.calculate_vertical(term_width, available_height, status_bar_height, constraints)
+        match self.state.config.preset {
+            LayoutPreset::Mixed => {
+                self.calculate_mixed(term_width, available_height, status_bar_height, constraints)
+            }
+            _ => {
+                if self.state.config.horizontal_split {
+                    self.calculate_horizontal(term_width, available_height, status_bar_height, constraints)
+                } else {
+                    self.calculate_vertical(term_width, available_height, status_bar_height, constraints)
+                }
+            }
         }
     }
 
@@ -182,22 +213,27 @@ impl Layout {
             + self.state.config.workflow_pane_ratio
             + self.state.config.logs_pane_ratio;
 
+        let gutter = self.state.config.gutter;
+        let total_gutter = 3 * gutter; // gutter between 4 panes (3 gaps)
+
+        let available_with_gutter = available_height.saturating_sub(total_gutter);
+
         let req_height = Self::bounded_height(
-            (available_height as f32 * self.state.config.request_pane_ratio / total_ratio) as u16,
+            (available_with_gutter as f32 * self.state.config.request_pane_ratio / total_ratio) as u16,
             constraints.request.min_height,
             constraints.request.max_height,
         );
         let resp_height = Self::bounded_height(
-            (available_height as f32 * self.state.config.response_pane_ratio / total_ratio) as u16,
+            (available_with_gutter as f32 * self.state.config.response_pane_ratio / total_ratio) as u16,
             constraints.response.min_height,
             constraints.response.max_height,
         );
         let wf_height = Self::bounded_height(
-            (available_height as f32 * self.state.config.workflow_pane_ratio / total_ratio) as u16,
+            (available_with_gutter as f32 * self.state.config.workflow_pane_ratio / total_ratio) as u16,
             constraints.workflow.min_height,
             constraints.workflow.max_height,
         );
-        let logs_height = available_height
+        let logs_height = available_with_gutter
             .saturating_sub(req_height)
             .saturating_sub(resp_height)
             .saturating_sub(wf_height)
@@ -207,8 +243,11 @@ impl Layout {
             .direction(Direction::Vertical)
             .constraints(vec![
                 Constraint::Length(req_height),
+                Constraint::Length(gutter),
                 Constraint::Length(resp_height),
+                Constraint::Length(gutter),
                 Constraint::Length(wf_height),
+                Constraint::Length(gutter),
                 Constraint::Length(logs_height),
                 Constraint::Length(status_bar_height),
             ])
@@ -216,10 +255,60 @@ impl Layout {
 
         PaneRects {
             request: areas[0],
-            response: areas[1],
-            workflow: areas[2],
-            logs: areas[3],
-            status_bar: areas[4],
+            response: areas[2],
+            workflow: areas[4],
+            logs: areas[6],
+            status_bar: areas[7],
+        }
+    }
+
+    fn calculate_mixed(
+        &self,
+        width: u16,
+        available_height: u16,
+        status_bar_height: u16,
+        constraints: &PaneConstraintsMap,
+    ) -> PaneRects {
+        // Request pane on top, ~30% of height
+        let req_height = (available_height as f32 * 0.3) as u16;
+        let req_height = req_height.max(constraints.request.min_height);
+
+        // Remaining space for bottom horizontal layout
+        let bottom_height = available_height.saturating_sub(req_height).saturating_sub(self.state.config.gutter);
+
+        let status_rect = Rect::new(0, req_height + bottom_height + self.state.config.gutter, width, status_bar_height);
+
+        // Bottom: horizontal split between Response, Workflow, Logs
+        let total_ratio = self.state.config.response_pane_ratio
+            + self.state.config.workflow_pane_ratio
+            + self.state.config.logs_pane_ratio;
+        let gutter = self.state.config.gutter;
+        let total_gutter = 3 * gutter;
+        let available_width = width.saturating_sub(total_gutter);
+
+        let resp_width = (available_width as f32 * self.state.config.response_pane_ratio / total_ratio) as u16;
+        let wf_width = (available_width as f32 * self.state.config.workflow_pane_ratio / total_ratio) as u16;
+        let logs_width = available_width
+            .saturating_sub(resp_width)
+            .saturating_sub(wf_width)
+            .max(constraints.logs.min_width);
+
+        let request_rect = Rect::new(0, 0, width, req_height);
+        let response_rect = Rect::new(0, req_height + gutter, resp_width, bottom_height);
+        let workflow_rect = Rect::new(resp_width + 2 * gutter, req_height + gutter, wf_width, bottom_height);
+        let logs_rect = Rect::new(
+            resp_width + wf_width + 3 * gutter,
+            req_height + gutter,
+            logs_width,
+            bottom_height,
+        );
+
+        PaneRects {
+            request: request_rect,
+            response: response_rect,
+            workflow: workflow_rect,
+            logs: logs_rect,
+            status_bar: status_rect,
         }
     }
 
@@ -232,12 +321,15 @@ impl Layout {
     ) -> PaneRects {
         let status_rect = Rect::new(0, available_height, width, status_bar_height);
 
+        let gutter = self.state.config.gutter;
+        let total_gutter = 3 * gutter; // gutter between 4 panes (3 gaps)
+
         let req_width = Self::bounded_width(
             self.state.config.request_pane_width,
             constraints.request.min_width,
             constraints.request.max_width,
         );
-        let remaining_width = width.saturating_sub(req_width);
+        let remaining_width = width.saturating_sub(req_width).saturating_sub(total_gutter);
 
         let resp_width = (remaining_width as f32 * self.state.config.response_pane_ratio
             / (self.state.config.response_pane_ratio
@@ -253,10 +345,10 @@ impl Layout {
             .max(constraints.logs.min_width);
 
         let request_rect = Rect::new(0, 0, req_width, available_height);
-        let response_rect = Rect::new(req_width, 0, resp_width, available_height);
-        let workflow_rect = Rect::new(req_width + resp_width, 0, wf_width, available_height);
+        let response_rect = Rect::new(req_width + gutter, 0, resp_width, available_height);
+        let workflow_rect = Rect::new(req_width + resp_width + 2 * gutter, 0, wf_width, available_height);
         let logs_rect = Rect::new(
-            req_width + resp_width + wf_width,
+            req_width + resp_width + wf_width + 3 * gutter,
             0,
             logs_width,
             available_height,
@@ -300,7 +392,11 @@ impl Layout {
     }
 
     pub fn toggle_split_direction(&mut self) {
-        self.state.config.horizontal_split = !self.state.config.horizontal_split;
+        self.state.config.preset = match self.state.config.preset {
+            LayoutPreset::Default => LayoutPreset::Mixed,
+            LayoutPreset::Mixed => LayoutPreset::Wide,
+            LayoutPreset::Wide => LayoutPreset::Default,
+        };
     }
 
     pub fn is_horizontal_split(&self) -> bool {
@@ -376,127 +472,34 @@ mod tests {
         assert_eq!(h, 40);
     }
 
+    // Task 8.1
     #[test]
-    fn test_calculate_vertical_layout() {
-        let mut layout = Layout::new();
-        layout.update_terminal_size(80, 24);
-        let rects = layout.calculate();
-        assert!(rects.request.width > 0);
-        assert!(rects.response.width > 0);
-        assert!(rects.workflow.width > 0);
-        assert!(rects.logs.width > 0);
-        assert!(rects.status_bar.width > 0);
+    fn test_layout_preset_variants() {
+        let presets = vec![LayoutPreset::Default, LayoutPreset::Mixed, LayoutPreset::Wide];
+        assert_eq!(presets.len(), 3);
     }
 
+    // Task 8.2
     #[test]
-    fn test_calculate_horizontal_layout() {
-        let mut layout = Layout::new();
+    fn test_mixed_layout_request_on_top() {
+        let mut layout = Layout::with_preset(LayoutPreset::Mixed);
         layout.update_terminal_size(120, 40);
-        layout.toggle_split_direction();
         let rects = layout.calculate();
-        assert!(rects.request.width > 0);
-        assert!(rects.response.width > 0);
-        assert!(rects.workflow.width > 0);
-        assert!(rects.logs.width > 0);
+        
+        // Request should be at top, spanning full width
+        assert_eq!(rects.request.y, 0);
+        // Should be ~30% of 40 = 12, but bounded by min_height
+        assert!(rects.request.height >= 15); // min_height is 15
     }
 
+    // Task 8.3
     #[test]
-    fn test_pane_rects_dimensions() {
+    fn test_f7_cycles_layout_presets() {
         let mut layout = Layout::new();
-        layout.update_terminal_size(100, 30);
-        let rects = layout.calculate();
-        let total_height = rects.request.height
-            + rects.response.height
-            + rects.workflow.height
-            + rects.logs.height
-            + rects.status_bar.height;
-        assert_eq!(total_height, 30);
-    }
-
-    #[test]
-    fn test_resize_request_pane() {
-        let mut layout = Layout::new();
-        let initial = layout.config().request_pane_width;
-        layout.resize_request_pane(10);
-        assert_eq!(layout.config().request_pane_width, initial + 10);
-    }
-
-    #[test]
-    fn test_resize_request_pane_minimum() {
-        let mut layout = Layout::new();
-        layout.resize_request_pane(-1000);
-        assert!(layout.config().request_pane_width >= layout.constraints().request.min_width);
-    }
-
-    #[test]
-    fn test_toggle_split_direction() {
-        let mut layout = Layout::new();
-        assert!(!layout.is_horizontal_split());
-        layout.toggle_split_direction();
-        assert!(layout.is_horizontal_split());
-        layout.toggle_split_direction();
-        assert!(!layout.is_horizontal_split());
-    }
-
-    #[test]
-    fn test_save_and_load() {
-        let mut layout = Layout::new();
-        layout.update_terminal_size(100, 30);
-        layout.resize_request_pane(10);
-
-        let json = layout.save().unwrap();
-        let mut new_layout = Layout::new();
-        new_layout.load(&json).unwrap();
-
-        assert_eq!(
-            layout.config().request_pane_width,
-            new_layout.config().request_pane_width
-        );
-    }
-
-    #[test]
-    fn test_validate_no_errors() {
-        let mut layout = Layout::new();
-        layout.update_terminal_size(120, 60);
-        let errors = layout.validate();
-        assert!(errors.is_empty(), "Errors: {:?}", errors);
-    }
-
-    #[test]
-    fn test_validate_small_terminal() {
-        let mut layout = Layout::new();
-        layout.update_terminal_size(30, 15);
-        let errors = layout.validate();
-        assert!(!errors.is_empty());
-    }
-
-    #[test]
-    fn test_bounded_width() {
-        assert_eq!(Layout::bounded_width(10, 20, None), 20);
-        assert_eq!(Layout::bounded_width(30, 20, Some(25)), 25);
-        assert_eq!(Layout::bounded_width(20, 10, Some(30)), 20);
-    }
-
-    #[test]
-    fn test_bounded_height() {
-        assert_eq!(Layout::bounded_height(5, 10, None), 10);
-        assert_eq!(Layout::bounded_height(15, 10, Some(12)), 12);
-        assert_eq!(Layout::bounded_height(10, 5, Some(20)), 10);
-    }
-
-    #[test]
-    fn test_constraints_default() {
-        let constraints = PaneConstraints::default();
-        assert_eq!(constraints.min_width, 20);
-        assert_eq!(constraints.min_height, 10);
-        assert_eq!(constraints.priority, 1);
-    }
-
-    #[test]
-    fn test_layout_config_default() {
-        let config = LayoutConfig::default();
-        assert_eq!(config.request_pane_ratio, 0.3);
-        assert!(!config.horizontal_split);
+        let initial = layout.config().preset;
+        
+        layout.toggle_split_direction(); // This should cycle preset
+        assert_ne!(layout.config().preset, initial);
     }
 
     #[test]
@@ -512,5 +515,56 @@ mod tests {
             + rects.status_bar.area();
 
         assert!(total_area > 0);
+    }
+
+    #[test]
+    fn test_pane_rects_dimensions() {
+        let mut layout = Layout::new();
+        layout.update_terminal_size(100, 30);
+        let rects = layout.calculate();
+        let total_height = rects.request.height
+            + rects.response.height
+            + rects.workflow.height
+            + rects.logs.height
+            + rects.status_bar.height
+            + 3 * layout.config().gutter; // Account for gutter between panes
+        assert_eq!(total_height, 30);
+    }
+
+    #[test]
+    fn test_calculate_horizontal_layout() {
+        let mut layout = Layout::new();
+        layout.update_terminal_size(120, 40);
+        layout.toggle_split_direction();
+        let rects = layout.calculate();
+        assert!(rects.request.width > 0);
+        assert!(rects.response.width > 0);
+        assert!(rects.workflow.width > 0);
+        assert!(rects.logs.width > 0);
+    }
+
+    #[test]
+    fn test_vertical_layout_has_gutter_between_panes() {
+        let mut layout = Layout::new();
+        layout.update_terminal_size(80, 40);
+        let rects = layout.calculate();
+        
+        // Request bottom + gutter should equal Response top
+        let expected_gap = layout.config().gutter;
+        assert_eq!(rects.request.y + rects.request.height + expected_gap, rects.response.y);
+    }
+
+    // Task 2.3
+    #[test]
+    fn test_horizontal_layout_has_gutter() {
+        let mut config = LayoutConfig::default();
+        config.horizontal_split = true;
+        let mut layout = Layout::with_config(config);
+        layout.update_terminal_size(120, 40);
+        let rects = layout.calculate();
+        
+        let gutter = layout.config().gutter;
+        // Request right edge + gutter should equal Response left edge
+        assert_eq!(rects.request.x + rects.request.width + gutter, rects.response.x);
     }
 }

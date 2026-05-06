@@ -237,6 +237,9 @@ impl StateReducer {
             AppEvent::ThemeChanged(_) => {
                 diff.app_state_changed = true;
             }
+            AppEvent::ConfigChanged { .. } => {
+                diff.app_state_changed = true;
+            }
         }
 
         diff
