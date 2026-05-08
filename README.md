@@ -73,6 +73,45 @@ cargo fmt
 | 14 | Configuration & Settings | Pending |
 | 15 | Integration + Polish | Pending |
 
+## Keyboard Shortcuts
+
+Yinx uses terminal-native, vim-inspired keybindings:
+
+### Pane Navigation
+| Shortcut | Action |
+|----------|--------|
+| `Tab` / `Shift+Tab` | Cycle panes forward/backward |
+| `Ctrl+1` | Request pane |
+| `Ctrl+2` | Response pane |
+| `Ctrl+3` | Workflow pane |
+| `Ctrl+4` | Logs pane |
+
+### Cursor Movement (within panes)
+| Shortcut | Action |
+|----------|--------|
+| `h` `j` `k` `l` | Left, Down, Up, Right |
+| `gg` | Go to top |
+| `G` | Go to bottom |
+| `Ctrl+u` | Page up |
+| `Ctrl+d` | Page down |
+
+### Actions
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+r` | Send request |
+| `Ctrl+w` | Toggle workflow pane |
+| `i` | Enter insert mode |
+| `v` | Enter visual mode |
+| `Esc` | Exit to normal mode |
+| `/` | Search |
+| `T` | Cycle themes |
+| `q` | Quit / close overlay |
+
+### Modes
+- **Normal**: Navigation and actions (default)
+- **Insert**: Text input and editing
+- **Command**: Command palette input
+
 ## License
 
 MIT

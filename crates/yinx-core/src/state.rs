@@ -141,6 +141,7 @@ pub enum InputMode {
     Normal,
     Insert,
     Visual,
+    Command,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]

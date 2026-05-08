@@ -38,9 +38,14 @@ pub enum KeyAction {
     SwitchPaneResponse,
     SwitchPaneWorkflow,
     SwitchPaneLogs,
+    CyclePaneNext,
+    CyclePanePrev,
+    SwitchTabLeft,
+    SwitchTabRight,
     ModeInsert,
     ModeNormal,
     ModeVisual,
+    ModeCommand,
     CursorUp,
     CursorDown,
     CursorLeft,
@@ -57,6 +62,9 @@ pub enum KeyAction {
     Save,
     Cancel,
     CycleTheme,
+    ToggleWorkflow,
+    OpenCommandPalette,
+    Search,
     Unknown,
 }
 
@@ -68,9 +76,14 @@ impl fmt::Display for KeyAction {
             KeyAction::SwitchPaneResponse => "switch_pane_response",
             KeyAction::SwitchPaneWorkflow => "switch_pane_workflow",
             KeyAction::SwitchPaneLogs => "switch_pane_logs",
+            KeyAction::CyclePaneNext => "cycle_pane_next",
+            KeyAction::CyclePanePrev => "cycle_pane_prev",
+            KeyAction::SwitchTabLeft => "switch_tab_left",
+            KeyAction::SwitchTabRight => "switch_tab_right",
             KeyAction::ModeInsert => "mode_insert",
             KeyAction::ModeNormal => "mode_normal",
             KeyAction::ModeVisual => "mode_visual",
+            KeyAction::ModeCommand => "mode_command",
             KeyAction::CursorUp => "cursor_up",
             KeyAction::CursorDown => "cursor_down",
             KeyAction::CursorLeft => "cursor_left",
@@ -87,6 +100,9 @@ impl fmt::Display for KeyAction {
             KeyAction::Save => "save",
             KeyAction::Cancel => "cancel",
             KeyAction::CycleTheme => "cycle_theme",
+            KeyAction::ToggleWorkflow => "toggle_workflow",
+            KeyAction::OpenCommandPalette => "open_command_palette",
+            KeyAction::Search => "search",
             KeyAction::Unknown => "unknown",
         };
         write!(f, "{}", s)
@@ -220,18 +236,23 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("c", &["Ctrl"]), KeyAction::Quit);
         bindings.insert(KeyBinding::new("q", &[]), KeyAction::Quit);
 
-        // Pane switching
-        bindings.insert(KeyBinding::new("1", &[]), KeyAction::SwitchPaneRequest);
-        bindings.insert(KeyBinding::new("2", &[]), KeyAction::SwitchPaneResponse);
-        bindings.insert(KeyBinding::new("3", &[]), KeyAction::SwitchPaneWorkflow);
-        bindings.insert(KeyBinding::new("4", &[]), KeyAction::SwitchPaneLogs);
+        // Pane navigation (Tab/Shift+Tab to cycle)
+        bindings.insert(KeyBinding::new("Tab", &[]), KeyAction::CyclePaneNext);
+        bindings.insert(KeyBinding::new("Tab", &["Shift"]), KeyAction::CyclePanePrev);
+        bindings.insert(KeyBinding::new("BackTab", &[]), KeyAction::CyclePanePrev);
+
+        // Direct pane access (Ctrl+number)
+        bindings.insert(KeyBinding::new("1", &["Ctrl"]), KeyAction::SwitchPaneRequest);
+        bindings.insert(KeyBinding::new("2", &["Ctrl"]), KeyAction::SwitchPaneResponse);
+        bindings.insert(KeyBinding::new("3", &["Ctrl"]), KeyAction::SwitchPaneWorkflow);
+        bindings.insert(KeyBinding::new("4", &["Ctrl"]), KeyAction::SwitchPaneLogs);
 
         // Mode switching
         bindings.insert(KeyBinding::new("i", &[]), KeyAction::ModeInsert);
         bindings.insert(KeyBinding::new("v", &[]), KeyAction::ModeVisual);
         bindings.insert(KeyBinding::new("Esc", &[]), KeyAction::ModeNormal);
 
-        // Vim-style navigation
+        // Vim-style navigation (within panes)
         bindings.insert(KeyBinding::new("h", &[]), KeyAction::CursorLeft);
         bindings.insert(KeyBinding::new("j", &[]), KeyAction::CursorDown);
         bindings.insert(KeyBinding::new("k", &[]), KeyAction::CursorUp);
@@ -253,11 +274,23 @@ impl KeyBindingConfig {
 
          // Actions
          bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
-         bindings.insert(KeyBinding::new("Enter", &[]), KeyAction::SendRequest);
+         bindings.insert(KeyBinding::new("r", &["Ctrl"]), KeyAction::SendRequest);
+         bindings.insert(KeyBinding::new("Enter", &["Ctrl"]), KeyAction::SendRequest);
          bindings.insert(KeyBinding::new("c", &["Ctrl"]), KeyAction::Quit);
-         
-         // Theme cycling
-         bindings.insert(KeyBinding::new("F10", &[]), KeyAction::CycleTheme);
+
+         // Tab switching (Shift+h/l)
+         bindings.insert(KeyBinding::new("h", &["Shift"]), KeyAction::SwitchTabLeft);
+         bindings.insert(KeyBinding::new("l", &["Shift"]), KeyAction::SwitchTabRight);
+
+         // Search
+         bindings.insert(KeyBinding::new("/", &[]), KeyAction::Search);
+
+         // Workflow toggle
+         bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::ToggleWorkflow);
+
+         // Theme cycling (Shift+t — never bind single-letter typing keys)
+         bindings.insert(KeyBinding::new("T", &[]), KeyAction::CycleTheme);
+         bindings.insert(KeyBinding::new("t", &["Shift"]), KeyAction::CycleTheme);
 
         Self { bindings }
     }
@@ -314,6 +347,7 @@ impl InputHandler {
             InputMode::Normal => self.handle_normal_mode(event),
             InputMode::Insert => self.handle_insert_mode(event),
             InputMode::Visual => self.handle_visual_mode(event),
+            InputMode::Command => self.handle_command_mode(event),
         }
     }
 
@@ -328,6 +362,11 @@ impl InputHandler {
             KeyAction::ModeInsert => {
                 self.mode = InputMode::Insert;
                 events.push(AppEvent::ModeChanged(InputMode::Insert));
+            }
+            KeyAction::ModeNormal => {}
+            KeyAction::ModeCommand => {
+                self.mode = InputMode::Command;
+                events.push(AppEvent::ModeChanged(InputMode::Command));
             }
             KeyAction::ModeVisual => {
                 self.mode = InputMode::Visual;
@@ -385,19 +424,35 @@ impl InputHandler {
             KeyAction::SwitchPaneLogs => {
                 events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs));
             }
+            KeyAction::CyclePaneNext => {
+                events.push(AppEvent::CyclePaneNext);
+            }
+            KeyAction::CyclePanePrev => {
+                events.push(AppEvent::CyclePanePrev);
+            }
+            KeyAction::SwitchTabLeft => {
+                events.push(AppEvent::CursorMoved { lines: 0, cols: -1 });
+            }
+            KeyAction::SwitchTabRight => {
+                events.push(AppEvent::CursorMoved { lines: 0, cols: 1 });
+            }
+            KeyAction::OpenCommandPalette => {
+                events.push(AppEvent::OpenCommandPalette);
+            }
+            KeyAction::Search => {
+                events.push(AppEvent::SearchActivated);
+            }
             KeyAction::SendRequest => {
-                events.push(AppEvent::SendRequest(
-                    yinx_core::request::RequestBuilder::new()
-                        .url("https://example.com")
-                        .build()
-                        .unwrap(),
-                ));
+                events.push(AppEvent::ExecuteRequest);
             }
             KeyAction::Save => {
                 events.push(AppEvent::SaveState);
             }
             KeyAction::CycleTheme => {
                 events.push(AppEvent::ThemeChanged("next".to_string()));
+            }
+            KeyAction::ToggleWorkflow => {
+                events.push(AppEvent::ToggleWorkflowPane);
             }
             _ => {
                 if let KeyCode::Char('g') = event.code {
@@ -431,8 +486,33 @@ impl InputHandler {
             KeyCode::Enter => {
                 events.push(AppEvent::KeyPressed("Enter".to_string()));
             }
+            KeyCode::Tab => {
+                self.mode = InputMode::Normal;
+                events.push(AppEvent::ModeChanged(InputMode::Normal));
+                events.push(AppEvent::CyclePaneNext);
+            }
+            KeyCode::BackTab => {
+                self.mode = InputMode::Normal;
+                events.push(AppEvent::ModeChanged(InputMode::Normal));
+                events.push(AppEvent::CyclePanePrev);
+            }
             KeyCode::Char(c) => {
-                events.push(AppEvent::KeyPressed(c.to_string()));
+                if event.modifiers.contains(KeyModifiers::CONTROL) {
+                    self.mode = InputMode::Normal;
+                    events.push(AppEvent::ModeChanged(InputMode::Normal));
+                    match c {
+                        'r' => events.push(AppEvent::ExecuteRequest),
+                        '1' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Request)),
+                        '2' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Response)),
+                        '3' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Workflow)),
+                        '4' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs)),
+                        'w' => events.push(AppEvent::ToggleWorkflowPane),
+                        'c' => events.push(AppEvent::Quit),
+                        _ => return vec![],
+                    }
+                } else {
+                    events.push(AppEvent::KeyPressed(c.to_string()));
+                }
             }
             _ => {}
         }
@@ -459,6 +539,31 @@ impl InputHandler {
             }
             KeyCode::Char('l') => {
                 events.push(AppEvent::CursorMoved { lines: 0, cols: 1 });
+            }
+            _ => {}
+        }
+
+        events
+    }
+
+    fn handle_command_mode(&mut self, event: KeyEvent) -> Vec<AppEvent> {
+        let mut events = Vec::new();
+
+        match event.code {
+            KeyCode::Esc => {
+                self.mode = InputMode::Normal;
+                events.push(AppEvent::ModeChanged(InputMode::Normal));
+            }
+            KeyCode::Enter => {
+                // TODO: Execute command from command palette input
+                self.mode = InputMode::Normal;
+                events.push(AppEvent::ModeChanged(InputMode::Normal));
+            }
+            KeyCode::Backspace => {
+                events.push(AppEvent::KeyPressed("Backspace".to_string()));
+            }
+            KeyCode::Char(c) => {
+                events.push(AppEvent::KeyPressed(c.to_string()));
             }
             _ => {}
         }
@@ -785,18 +890,28 @@ mod tests {
     fn test_input_handler_pane_switching() {
         let mut handler = InputHandler::new();
 
-        let event = KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE);
+        // Tab cycles to next pane (Response)
+        let event = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
+        let events = handler.handle_key(event);
+        assert!(matches!(
+            events[0],
+            AppEvent::CyclePaneNext
+        ));
+
+        // Shift+Tab cycles to previous pane (Logs)
+        let event = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
+        let events = handler.handle_key(event);
+        assert!(matches!(
+            events[0],
+            AppEvent::CyclePanePrev
+        ));
+
+        // Ctrl+1 switches directly to Request pane
+        let event = KeyEvent::new(KeyCode::Char('1'), KeyModifiers::CONTROL);
         let events = handler.handle_key(event);
         assert!(matches!(
             events[0],
             AppEvent::PaneChanged(yinx_core::state::ActivePane::Request)
-        ));
-
-        let event = KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE);
-        let events = handler.handle_key(event);
-        assert!(matches!(
-            events[0],
-            AppEvent::PaneChanged(yinx_core::state::ActivePane::Response)
         ));
     }
 

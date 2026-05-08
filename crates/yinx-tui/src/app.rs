@@ -25,11 +25,11 @@ use crate::widgets::StatusBar;
 use crate::workflow_pane::WorkflowPane;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 use yinx_core::response::{Response, ResponseBody};
-use yinx_core::state::{ActivePane, NetworkState};
+use yinx_core::state::{ActivePane, InputMode, NetworkState};
 use yinx_core::timing::{RequestMetrics, Timing};
 use yinx_http::client::HttpClient;
 #[cfg(test)]
-use yinx_core::state::{InputMode, UiState};
+use yinx_core::state::UiState;
 
 use crate::input::InputHandler;
 
@@ -146,12 +146,14 @@ struct TuiShell {
     request_pane: RequestPane,
     logs_pane: LogsPane,
     workflow_pane: WorkflowPane,
+    workflow_visible: bool,
     settings_pane: SettingsPane,
     active_pane: ActivePane,
     network_state: NetworkState,
     latest_response: Option<Response>,
     latest_error: Option<String>,
     should_quit: bool,
+    input_handler: InputHandler,
 }
 
 impl TuiShell {
@@ -165,11 +167,11 @@ impl TuiShell {
         let mut logs_pane = LogsPane::new();
         logs_pane.add_log(
             LogLevel::Info,
-            "Welcome to Yinx. Edit the request, then press F5 to send it.",
+            "Welcome to Yinx. Edit the request, then press ^R to send.",
         );
         logs_pane.add_log(
             LogLevel::Info,
-            "F1-F4 switch panes, F6 opens settings, F7 toggles layout, Ctrl+C quits.",
+            "Tab: panes | ^R: send | Esc/q: quit | /: search",
         );
 
         let mut theme_registry = ThemeRegistry::new();
@@ -181,15 +183,17 @@ impl TuiShell {
             theme: Theme::dark(),
             theme_registry,
             layout,
-            request_pane: RequestPane::new().with_url("https://example.com"),
+            request_pane: RequestPane::new(),
             logs_pane,
             workflow_pane: WorkflowPane::new(),
+            workflow_visible: false,
             settings_pane: SettingsPane::new(),
             active_pane: ActivePane::Request,
             network_state: NetworkState::Idle,
             latest_response: None,
             latest_error: None,
             should_quit: false,
+            input_handler: InputHandler::new(),
         }
     }
 
@@ -236,6 +240,7 @@ impl TuiShell {
     }
 
     async fn handle_key(&mut self, key_event: KeyEvent) -> Result<(), AppError> {
+        // Handle Ctrl+C for quit (emergency exit)
         if key_event.modifiers.contains(KeyModifiers::CONTROL)
             && key_event.code == KeyCode::Char('c')
         {
@@ -243,9 +248,10 @@ impl TuiShell {
             return Ok(());
         }
 
+        // Handle settings pane if open
         if self.settings_pane.is_open() {
             match key_event.code {
-                KeyCode::F(6) => {
+                KeyCode::Esc | KeyCode::Char('q') => {
                     self.settings_pane.close();
                     return Ok(());
                 }
@@ -258,39 +264,168 @@ impl TuiShell {
             }
         }
 
-        match key_event.code {
-            KeyCode::F(1) => self.active_pane = ActivePane::Request,
-            KeyCode::F(2) => self.active_pane = ActivePane::Response,
-            KeyCode::F(3) => self.active_pane = ActivePane::Workflow,
-            KeyCode::F(4) => self.active_pane = ActivePane::Logs,
-            KeyCode::F(5) => self.execute_request().await?,
-            KeyCode::F(6) => self.settings_pane.open(),
-            KeyCode::F(7) => self.layout.toggle_split_direction(),
-            KeyCode::F(8) => self.layout.resize_request_pane(-4),
-            KeyCode::F(9) => self.layout.resize_request_pane(4),
-            KeyCode::F(10) => {
-                self.theme = self.theme_registry.cycle_next().clone();
+        // Use InputHandler for terminal-native keybindings
+        let events = self.input_handler.handle_key(key_event);
+
+        let mut handled = false;
+        for event in events {
+            match event {
+                AppEvent::Quit => {
+                    self.should_quit = true;
+                    handled = true;
+                }
+                AppEvent::PaneChanged(pane) => {
+                    self.active_pane = pane;
+                    handled = true;
+                }
+                AppEvent::ModeChanged(_) => {
+                    handled = true;
+                }
+                AppEvent::CyclePaneNext => {
+                    self.active_pane = match self.active_pane {
+                        ActivePane::Request => ActivePane::Response,
+                        ActivePane::Response => ActivePane::Workflow,
+                        ActivePane::Workflow => ActivePane::Logs,
+                        ActivePane::Logs => ActivePane::Request,
+                    };
+                    handled = true;
+                }
+                AppEvent::CyclePanePrev => {
+                    self.active_pane = match self.active_pane {
+                        ActivePane::Request => ActivePane::Logs,
+                        ActivePane::Logs => ActivePane::Workflow,
+                        ActivePane::Workflow => ActivePane::Response,
+                        ActivePane::Response => ActivePane::Request,
+                    };
+                    handled = true;
+                }
+                AppEvent::ToggleWorkflowPane => {
+                    self.workflow_visible = !self.workflow_visible;
+                    self.layout.set_workflow_visible(self.workflow_visible);
+                    if !self.workflow_visible && self.active_pane == ActivePane::Workflow {
+                        self.active_pane = ActivePane::Request;
+                    }
+                    handled = true;
+                }
+                AppEvent::SendRequest(req) => {
+                    if let Err(e) = self.execute_request_with(req).await {
+                        self.logs_pane.add_log(LogLevel::Error, e.to_string());
+                        self.latest_error = Some(e.to_string());
+                    }
+                    handled = true;
+                }
+                AppEvent::ExecuteRequest => {
+                    if let Err(e) = self.execute_request().await {
+                        self.logs_pane.add_log(LogLevel::Error, e.to_string());
+                        self.latest_error = Some(e.to_string());
+                    }
+                    handled = true;
+                }
+                AppEvent::OpenCommandPalette => {
+                    handled = true;
+                }
+                AppEvent::SearchActivated => {
+                    handled = true;
+                }
+                AppEvent::ThemeChanged(_) => {
+                    self.theme = self.theme_registry.cycle_next().clone();
+                    handled = true;
+                }
+                _ => {}
             }
-            _ => self.forward_key_to_active_pane(key_event),
+        }
+
+        // Forward key to active pane if InputHandler didn't mark it as handled.
+        if !handled {
+            self.forward_key_to_active_pane(key_event);
+        }
+
+        Ok(())
+    }
+
+    async fn execute_request_with(&mut self, request: yinx_core::request::Request) -> Result<(), AppError> {
+        let timeout_secs = self.settings_pane.config.defaults.default_timeout_secs;
+        let follow_redirects = self.settings_pane.config.defaults.follow_redirects;
+        let verify_tls = self.settings_pane.config.defaults.verify_tls;
+
+        self.logs_pane.set_current_request(request.clone());
+        self.logs_pane.add_log(
+            LogLevel::Info,
+            format!("Sending {} {}", request.method, request.url.as_str()),
+        );
+        self.network_state = NetworkState::Loading;
+        self.latest_error = None;
+
+        let started_at = std::time::Instant::now();
+        let client = HttpClient::new()
+            .map_err(|e| AppError::Render(e.to_string()))?
+            .with_timeout(timeout_secs)
+            .with_follow_redirects(follow_redirects)
+            .with_tls_verify(verify_tls);
+
+        match client.send_request(request).await {
+            Ok(mut response) => {
+                let elapsed_ms = started_at.elapsed().as_millis() as u64;
+                response.timing_ms = elapsed_ms;
+
+                let metrics = RequestMetrics::new()
+                    .with_timing(Timing::new().with_total(elapsed_ms))
+                    .with_status_code(response.status.code())
+                    .with_body_size(response.body_size());
+                self.logs_pane.set_metrics(metrics);
+
+                if response.is_error() {
+                    self.logs_pane.add_log(
+                        LogLevel::Warning,
+                        format!("Request completed with {}", response.status),
+                    );
+                } else {
+                    self.logs_pane.add_log(
+                        LogLevel::Info,
+                        format!(
+                            "Request completed with {} in {}ms",
+                            response.status, elapsed_ms
+                        ),
+                    );
+                }
+
+                self.latest_response = Some(response);
+                self.network_state = NetworkState::Idle;
+                self.active_pane = ActivePane::Response;
+            }
+            Err(error) => {
+                let message = error.to_string();
+                self.logs_pane.add_log(LogLevel::Error, message.clone());
+                self.latest_error = Some(message.clone());
+                self.network_state = NetworkState::Error(message);
+            }
         }
 
         Ok(())
     }
 
     fn forward_key_to_active_pane(&mut self, key_event: KeyEvent) {
+        let is_normal = self.input_handler.current_mode() == InputMode::Normal;
+        let code = if is_normal {
+            match key_event.code {
+                KeyCode::Char('h') => KeyCode::Left,
+                KeyCode::Char('j') => KeyCode::Down,
+                KeyCode::Char('k') => KeyCode::Up,
+                KeyCode::Char('l') => KeyCode::Right,
+                _ => key_event.code,
+            }
+        } else {
+            key_event.code
+        };
         match self.active_pane {
             ActivePane::Request => {
-                let _ = self
-                    .request_pane
-                    .handle_key(key_event.code, key_event.modifiers);
+                let _ = self.request_pane.handle_key(code, key_event.modifiers);
             }
             ActivePane::Workflow => {
-                let _ = self
-                    .workflow_pane
-                    .handle_key(key_event.code, key_event.modifiers);
+                let _ = self.workflow_pane.handle_key(code, key_event.modifiers);
             }
             ActivePane::Logs => {
-                let _ = self.logs_pane.handle_key(key_event.code, key_event.modifiers);
+                let _ = self.logs_pane.handle_key(code, key_event.modifiers);
             }
             ActivePane::Response => {}
         }
@@ -384,12 +519,14 @@ impl TuiShell {
             pane_rects.response,
             self.active_pane == ActivePane::Response,
         );
-        self.workflow_pane.render(
-            frame,
-            pane_rects.workflow,
-            &self.theme,
-            self.active_pane == ActivePane::Workflow,
-        );
+        if self.workflow_visible {
+            self.workflow_pane.render(
+                frame,
+                pane_rects.workflow,
+                &self.theme,
+                self.active_pane == ActivePane::Workflow,
+            );
+        }
         self.logs_pane.render(
             frame,
             pane_rects.logs,
@@ -397,16 +534,21 @@ impl TuiShell {
             self.active_pane == ActivePane::Logs,
         );
 
-        let status = StatusBar::new("TUI")
+        let current_mode = self.input_handler.current_mode();
+        let mode_str = match current_mode {
+            InputMode::Normal => "NORMAL",
+            InputMode::Insert => "INSERT",
+            InputMode::Visual => "VISUAL",
+            InputMode::Command => "COMMAND",
+        };
+        let status = StatusBar::new(mode_str)
             .with_network_state(&self.network_state)
             .with_cursor(0, 0)
             .with_hints(vec![
-                ("F1-F4", "Panes"),
-                ("F5", "Run"),
-                ("F6", "Settings"),
-                ("F7", "Layout"),
-                ("F8/F9", "Resize"),
-                ("Ctrl+C", "Quit"),
+                ("Tab", "Panes"),
+                ("^R", "Send"),
+                ("Esc/q", "Quit"),
+                ("/", "Search"),
             ]);
         status.render(frame, pane_rects.status_bar, &self.theme);
 
@@ -971,10 +1113,10 @@ mod tests {
     }
 
      #[test]
-     fn test_f10_cycles_theme() {
+     fn test_t_key_cycles_theme() {
          use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
          let mut handler = InputHandler::new();
-         let key = KeyEvent::new(KeyCode::F(10), KeyModifiers::NONE);
+         let key = KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE);
          let events = handler.handle_key(key);
          assert!(events.iter().any(|e| matches!(e, AppEvent::ThemeChanged(_))));
      }

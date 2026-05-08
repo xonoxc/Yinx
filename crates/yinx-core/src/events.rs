@@ -14,9 +14,15 @@ pub enum AppEvent {
     Scrolled(i64),
     TerminalResized { width: u16, height: u16 },
     Quit,
+    CyclePaneNext,
+    CyclePanePrev,
+    ToggleWorkflowPane,
+    OpenCommandPalette,
+    SearchActivated,
 
     // Network events
     SendRequest(Request),
+    ExecuteRequest,
     RequestStarted,
     RequestCompleted(Response),
     RequestFailed(String),
@@ -164,7 +170,14 @@ impl StateReducer {
             }
             AppEvent::TerminalResized { .. } => {}
             AppEvent::Quit => {}
+            AppEvent::CyclePaneNext => {}
+            AppEvent::CyclePanePrev => {}
+            AppEvent::ToggleWorkflowPane => {}
             AppEvent::SendRequest(_) => {
+                self.network_state = NetworkState::Loading;
+                diff.network_state_changed = true;
+            }
+            AppEvent::ExecuteRequest => {
                 self.network_state = NetworkState::Loading;
                 diff.network_state_changed = true;
             }
@@ -236,6 +249,13 @@ impl StateReducer {
             AppEvent::SettingsClosed => {}
             AppEvent::ThemeChanged(_) => {
                 diff.app_state_changed = true;
+            }
+            AppEvent::OpenCommandPalette => {
+                self.ui_state.set_mode(InputMode::Command);
+                diff.ui_state_changed = true;
+            }
+            AppEvent::SearchActivated => {
+                diff.ui_state_changed = true;
             }
             AppEvent::ConfigChanged { .. } => {
                 diff.app_state_changed = true;
