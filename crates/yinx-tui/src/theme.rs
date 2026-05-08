@@ -203,7 +203,7 @@ impl Theme {
                 info: ColorDef::BLUE,
             },
             pane: PaneColors {
-                background: Some(ColorDef::Rgb(20, 20, 30)),
+                background: None,
                 title: ColorDef::CYAN,
                 status_bar_bg: ColorDef::Rgb(40, 44, 52),
                 status_bar_fg: ColorDef::WHITE,
@@ -234,7 +234,7 @@ impl Theme {
                 info: ColorDef::Rgb(0, 100, 200),
             },
             pane: PaneColors {
-                background: Some(ColorDef::Rgb(250, 250, 250)),
+                background: None,
                 title: ColorDef::Rgb(50, 100, 200),
                 status_bar_bg: ColorDef::Rgb(220, 220, 220),
                 status_bar_fg: ColorDef::Rgb(30, 30, 30),

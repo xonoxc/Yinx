@@ -482,22 +482,38 @@ impl TuiShell {
 
     fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
+
+        let outer = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.theme.border.color.as_color()));
+        let inner = outer.inner(area);
+        frame.render_widget(outer, area);
+
+        let saved = self.layout.terminal_size();
+        self.layout.update_terminal_size(inner.width, inner.height);
         let pane_rects = self.layout.calculate();
+        self.layout.update_terminal_size(saved.0, saved.1);
+
+        let off = |mut r: ratatui::layout::Rect| {
+            r.x += inner.x;
+            r.y += inner.y;
+            r
+        };
 
         self.request_pane.render(
             frame,
-            pane_rects.request,
+            off(pane_rects.request),
             &self.theme,
             self.active_pane == ActivePane::Request,
         );
         self.render_response_pane(
             frame,
-            pane_rects.response,
+            off(pane_rects.response),
             self.active_pane == ActivePane::Response,
         );
         self.logs_pane.render(
             frame,
-            pane_rects.logs,
+            off(pane_rects.logs),
             &self.theme,
             self.active_pane == ActivePane::Logs,
         );
@@ -518,7 +534,7 @@ impl TuiShell {
                 ("Esc/q", "Quit"),
                 ("/", "Search"),
             ]);
-        status.render(frame, pane_rects.status_bar, &self.theme);
+        status.render(frame, off(pane_rects.status_bar), &self.theme);
 
         if self.settings_pane.is_open() {
             self.settings_pane.render(frame, centered_rect(area, 70, 70));
