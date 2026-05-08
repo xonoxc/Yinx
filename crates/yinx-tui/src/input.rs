@@ -62,7 +62,6 @@ pub enum KeyAction {
     Save,
     Cancel,
     CycleTheme,
-    ToggleWorkflow,
     OpenCommandPalette,
     Search,
     Unknown,
@@ -100,7 +99,6 @@ impl fmt::Display for KeyAction {
             KeyAction::Save => "save",
             KeyAction::Cancel => "cancel",
             KeyAction::CycleTheme => "cycle_theme",
-            KeyAction::ToggleWorkflow => "toggle_workflow",
             KeyAction::OpenCommandPalette => "open_command_palette",
             KeyAction::Search => "search",
             KeyAction::Unknown => "unknown",
@@ -285,9 +283,6 @@ impl KeyBindingConfig {
          // Search
          bindings.insert(KeyBinding::new("/", &[]), KeyAction::Search);
 
-         // Workflow toggle
-         bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::ToggleWorkflow);
-
          // Theme cycling (Shift+t — never bind single-letter typing keys)
          bindings.insert(KeyBinding::new("T", &[]), KeyAction::CycleTheme);
          bindings.insert(KeyBinding::new("t", &["Shift"]), KeyAction::CycleTheme);
@@ -451,9 +446,6 @@ impl InputHandler {
             KeyAction::CycleTheme => {
                 events.push(AppEvent::ThemeChanged("next".to_string()));
             }
-            KeyAction::ToggleWorkflow => {
-                events.push(AppEvent::ToggleWorkflowPane);
-            }
             _ => {
                 if let KeyCode::Char('g') = event.code {
                     if self.pending_key == Some('g') {
@@ -504,9 +496,8 @@ impl InputHandler {
                         'r' => events.push(AppEvent::ExecuteRequest),
                         '1' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Request)),
                         '2' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Response)),
-                        '3' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Workflow)),
+                        '3' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs)),
                         '4' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs)),
-                        'w' => events.push(AppEvent::ToggleWorkflowPane),
                         'c' => events.push(AppEvent::Quit),
                         _ => return vec![],
                     }

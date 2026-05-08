@@ -7,7 +7,6 @@ pub mod request_pane;
 pub mod settings_pane;
 pub mod theme;
 pub mod widgets;
-pub mod workflow_pane;
 
 pub use app::{run_tui, with_error_boundary, App, AppError, EventLoop, TerminalGuard};
 pub use editor::{
@@ -20,4 +19,3 @@ pub use request_pane::{
     AuthType, BodyType, EditableField, FocusedField, RequestPane, RequestPaneEditSpec, RequestTab,
 };
 pub use settings_pane::SettingsPane;
-pub use workflow_pane::{NodeStatus, WorkflowPane, WorkflowTab};

@@ -10,7 +10,7 @@ use crossterm::{
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Terminal as RatatuiTerminal;
@@ -22,7 +22,6 @@ use crate::request_pane::RequestPane;
 use crate::settings_pane::SettingsPane;
 use crate::theme::{Theme, ThemeRegistry};
 use crate::widgets::StatusBar;
-use crate::workflow_pane::WorkflowPane;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 use yinx_core::response::{Response, ResponseBody};
 use yinx_core::state::{ActivePane, InputMode, NetworkState};
@@ -145,8 +144,6 @@ struct TuiShell {
     layout: Layout,
     request_pane: RequestPane,
     logs_pane: LogsPane,
-    workflow_pane: WorkflowPane,
-    workflow_visible: bool,
     settings_pane: SettingsPane,
     active_pane: ActivePane,
     network_state: NetworkState,
@@ -185,8 +182,6 @@ impl TuiShell {
             layout,
             request_pane: RequestPane::new(),
             logs_pane,
-            workflow_pane: WorkflowPane::new(),
-            workflow_visible: false,
             settings_pane: SettingsPane::new(),
             active_pane: ActivePane::Request,
             network_state: NetworkState::Idle,
@@ -228,8 +223,6 @@ impl TuiShell {
             self.active_pane = ActivePane::Response;
         } else if self.is_in_rect(mouse_event.column, mouse_event.row, rects.request) {
             self.active_pane = ActivePane::Request;
-        } else if self.is_in_rect(mouse_event.column, mouse_event.row, rects.workflow) {
-            self.active_pane = ActivePane::Workflow;
         } else if self.is_in_rect(mouse_event.column, mouse_event.row, rects.logs) {
             self.active_pane = ActivePane::Logs;
         }
@@ -284,27 +277,19 @@ impl TuiShell {
                 AppEvent::CyclePaneNext => {
                     self.active_pane = match self.active_pane {
                         ActivePane::Request => ActivePane::Response,
-                        ActivePane::Response => ActivePane::Workflow,
-                        ActivePane::Workflow => ActivePane::Logs,
+                        ActivePane::Response => ActivePane::Logs,
                         ActivePane::Logs => ActivePane::Request,
+                        _ => ActivePane::Request,
                     };
                     handled = true;
                 }
                 AppEvent::CyclePanePrev => {
                     self.active_pane = match self.active_pane {
                         ActivePane::Request => ActivePane::Logs,
-                        ActivePane::Logs => ActivePane::Workflow,
-                        ActivePane::Workflow => ActivePane::Response,
+                        ActivePane::Logs => ActivePane::Response,
                         ActivePane::Response => ActivePane::Request,
+                        _ => ActivePane::Request,
                     };
-                    handled = true;
-                }
-                AppEvent::ToggleWorkflowPane => {
-                    self.workflow_visible = !self.workflow_visible;
-                    self.layout.set_workflow_visible(self.workflow_visible);
-                    if !self.workflow_visible && self.active_pane == ActivePane::Workflow {
-                        self.active_pane = ActivePane::Request;
-                    }
                     handled = true;
                 }
                 AppEvent::SendRequest(req) => {
@@ -421,13 +406,11 @@ impl TuiShell {
             ActivePane::Request => {
                 let _ = self.request_pane.handle_key(code, key_event.modifiers);
             }
-            ActivePane::Workflow => {
-                let _ = self.workflow_pane.handle_key(code, key_event.modifiers);
-            }
             ActivePane::Logs => {
                 let _ = self.logs_pane.handle_key(code, key_event.modifiers);
             }
             ActivePane::Response => {}
+            _ => {}
         }
     }
 
@@ -499,13 +482,6 @@ impl TuiShell {
 
     fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
-        let bg_color = self.theme.background
-            .as_ref()
-            .map(|c| c.as_color())
-            .unwrap_or(Color::Reset);
-        let background = Block::default().style(Style::default().bg(bg_color));
-        frame.render_widget(background, area);
-
         let pane_rects = self.layout.calculate();
 
         self.request_pane.render(
@@ -519,14 +495,6 @@ impl TuiShell {
             pane_rects.response,
             self.active_pane == ActivePane::Response,
         );
-        if self.workflow_visible {
-            self.workflow_pane.render(
-                frame,
-                pane_rects.workflow,
-                &self.theme,
-                self.active_pane == ActivePane::Workflow,
-            );
-        }
         self.logs_pane.render(
             frame,
             pane_rects.logs,

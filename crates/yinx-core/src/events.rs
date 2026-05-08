@@ -16,7 +16,6 @@ pub enum AppEvent {
     Quit,
     CyclePaneNext,
     CyclePanePrev,
-    ToggleWorkflowPane,
     OpenCommandPalette,
     SearchActivated,
 
@@ -172,7 +171,6 @@ impl StateReducer {
             AppEvent::Quit => {}
             AppEvent::CyclePaneNext => {}
             AppEvent::CyclePanePrev => {}
-            AppEvent::ToggleWorkflowPane => {}
             AppEvent::SendRequest(_) => {
                 self.network_state = NetworkState::Loading;
                 diff.network_state_changed = true;
