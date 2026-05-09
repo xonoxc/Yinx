@@ -63,6 +63,10 @@ impl SettingsPane {
         self.is_open
     }
 
+    pub fn toggle(&mut self) {
+        self.is_open = !self.is_open;
+    }
+
     pub fn handle_event(&mut self, event: &AppEvent) -> Vec<AppEvent> {
         let mut events = Vec::new();
 

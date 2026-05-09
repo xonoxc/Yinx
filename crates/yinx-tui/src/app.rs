@@ -9,10 +9,10 @@ use crossterm::{
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::layout::{Alignment, Rect};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Terminal as RatatuiTerminal;
 
 use crate::editor::{self, EditorError, EditorFormat, SystemEditorRunner, TerminalSession};
@@ -148,6 +148,7 @@ struct TuiShell {
     latest_response: Option<Response>,
     latest_error: Option<String>,
     should_quit: bool,
+    show_help: bool,
     input_handler: InputHandler,
 }
 
@@ -192,6 +193,7 @@ impl TuiShell {
             latest_response: None,
             latest_error: None,
             should_quit: false,
+            show_help: false,
             input_handler: InputHandler::new(),
         }
     }
@@ -281,6 +283,56 @@ impl TuiShell {
                     }
                     return Ok(());
                 }
+            }
+        }
+
+        // Handle help overlay
+        if self.show_help {
+            match key_event.code {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('?') => {
+                    self.show_help = false;
+                    return Ok(());
+                }
+                _ => return Ok(()),
+            }
+        }
+
+        // Normal-mode global operations: resize, help, layout toggle
+        if self.input_handler.current_mode() == InputMode::Normal {
+            match key_event.code {
+                KeyCode::Char('?') => {
+                    self.show_help = true;
+                    return Ok(());
+                }
+                KeyCode::Char('+') | KeyCode::Char('=') => {
+                    match self.active_pane {
+                        ActivePane::Request => self.layout.resize_request_pane(5),
+                        ActivePane::Response => self.layout.resize_response_pane(5),
+                        ActivePane::Logs => self.layout.resize_logs_pane(5),
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+                KeyCode::Char('-') | KeyCode::Char('_') => {
+                    match self.active_pane {
+                        ActivePane::Request => self.layout.resize_request_pane(-5),
+                        ActivePane::Response => self.layout.resize_response_pane(-5),
+                        ActivePane::Logs => self.layout.resize_logs_pane(-5),
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+                KeyCode::F(7) => {
+                    self.layout.toggle_split_direction();
+                    return Ok(());
+                }
+                KeyCode::F(10) => {
+                    let theme = self.theme_registry.cycle_next().clone();
+                    self.settings_pane.config.theme = theme.name.clone();
+                    self.theme = theme;
+                    return Ok(());
+                }
+                _ => {}
             }
         }
 
@@ -535,6 +587,11 @@ impl TuiShell {
 
         let saved = self.layout.terminal_size();
         self.layout.update_terminal_size(inner.width, inner.height);
+
+        // Auto-resize request pane to fit URL content
+        self.layout
+            .auto_resize_request_to_fit(self.request_pane.url().len());
+
         let pane_rects = self
             .layout
             .calculate_with_context(crate::layout::LayoutContext {
@@ -604,6 +661,74 @@ impl TuiShell {
             self.settings_pane
                 .render(frame, centered_rect(area, 70, 70), &self.theme);
         }
+
+        if self.show_help {
+            self.render_help(frame, area);
+        }
+    }
+
+    fn render_help(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let help_rect = centered_rect(area, 60, 70);
+        let help_lines = vec![
+            Line::from(Span::styled(
+                " KEYMAP ",
+                Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Pane Navigation", Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from("  Tab / Shift+Tab    Cycle panes forward/backward"),
+            Line::from("  Ctrl+1/2/3/4       Jump to Request/Response/Workflow/Logs"),
+            Line::from("  Mouse click         Focus pane under cursor"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Resize Active Pane", Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from("  + / =               Expand active pane"),
+            Line::from("  - / _               Shrink active pane"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Layout", Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from("  F7                  Cycle layout preset"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Editing (Normal mode)", Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from("  i                   Enter Insert mode"),
+            Line::from("  v                   Enter Visual mode"),
+            Line::from("  Esc                 Return to Normal mode"),
+            Line::from("  h/j/k/l             Move cursor (Normal/Visual mode)"),
+            Line::from("  Ctrl+D / Ctrl+U     Page down / Page up"),
+            Line::from("  Backspace           Delete character before cursor"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Actions", Style::default().add_modifier(Modifier::BOLD)),
+            ]),
+            Line::from("  Ctrl+R / Ctrl+Enter Send request"),
+            Line::from("  Ctrl+S              Save state"),
+            Line::from("  T / Shift+T         Cycle theme"),
+            Line::from("  /                   Search"),
+            Line::from("  q / Ctrl+C          Quit"),
+            Line::from(""),
+            Line::from("  ? / Esc / q         Close this help"),
+        ];
+
+        let help_block = Block::default()
+            .borders(Borders::ALL)
+            .title(" HELP ")
+            .border_style(Style::default().fg(self.theme.border.active_color.as_color()))
+            .style(Style::default().bg(self.theme.pane_bg(true)).fg(self.theme.foreground.as_color()));
+
+        let inner = help_block.inner(help_rect);
+        frame.render_widget(Clear, help_rect);
+        frame.render_widget(help_block, help_rect);
+
+        let paragraph = Paragraph::new(help_lines)
+            .style(Style::default().fg(self.theme.foreground.as_color()))
+            .alignment(Alignment::Left);
+        frame.render_widget(paragraph, inner);
     }
 
     fn render_response_pane(&self, frame: &mut ratatui::Frame<'_>, area: Rect, is_active: bool) {

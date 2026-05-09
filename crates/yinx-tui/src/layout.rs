@@ -50,7 +50,7 @@ impl Default for LayoutConfig {
             workflow_pane_ratio: 0.0,
             logs_pane_ratio: 0.35,
             horizontal_split: true,
-            request_pane_width: 30,
+            request_pane_width: 60,
             response_pane_height: 20,
             gutter: 0,
             preset: LayoutPreset::Wide,
@@ -99,7 +99,7 @@ impl Default for PaneConstraintsMap {
     fn default() -> Self {
         Self {
             request: PaneConstraints {
-                min_width: 30,
+                min_width: 50,
                 min_height: 5,
                 priority: 3,
                 ..Default::default()
@@ -398,6 +398,35 @@ impl Layout {
         self.state.config.response_pane_height = new_height;
     }
 
+    pub fn resize_logs_pane(&mut self, delta: i16) {
+        let current = self.state.config.response_pane_height;
+        let new_height = (current as i16 - delta)
+            .max(self.state.constraints.logs.min_height as i16)
+            .min(
+                (self.terminal_size.1 as i16)
+                    - self.state.constraints.request.min_height as i16
+                    - self.state.constraints.status_bar.min_height as i16,
+            ) as u16;
+        self.state.config.response_pane_height = new_height;
+    }
+
+    pub fn auto_resize_request_to_fit(&mut self, url_len: usize) {
+        if self.state.config.preset != LayoutPreset::Wide {
+            return;
+        }
+        let (term_width, _) = self.terminal_size;
+        let required_width = (url_len + 14) as u16;
+        let max_width = (term_width as f32 * 0.7) as u16;
+        let new_width = required_width
+            .max(self.state.constraints.request.min_width)
+            .min(max_width)
+            .min(term_width.saturating_sub(self.state.constraints.response.min_width));
+
+        if new_width > self.state.config.request_pane_width {
+            self.state.config.request_pane_width = new_width;
+        }
+    }
+
     pub fn toggle_split_direction(&mut self) {
         self.state.config.preset = match self.state.config.preset {
             LayoutPreset::Default => LayoutPreset::Mixed,
@@ -527,8 +556,8 @@ mod tests {
         let mut layout = Layout::new();
         layout.update_terminal_size(100, 30);
         let rects = layout.calculate();
-        assert_eq!(rects.request.width, 30);
-        assert_eq!(rects.response.width, 70);
+        assert_eq!(rects.request.width, 60);
+        assert_eq!(rects.response.width, 40);
         assert_eq!(rects.status_bar.y, 29); // Single row at bottom
     }
 

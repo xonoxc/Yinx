@@ -36,31 +36,30 @@ yinx
 3. Press `Tab` to move to the method selector
 4. Use `Up`/`Down` arrows to select HTTP method
 5. Press `Enter` to confirm method
-6. Press `F5` to execute the request
+6. Press `Ctrl+R` to execute the request
 
 ## TUI Navigation
 
 ### Pane Navigation
-- `F1` - Focus Request Pane
-- `F2` - Focus Response Pane
-- `F3` - Focus Workflow Pane
-- `F4` - Focus Logs Pane
-
-### Mouse Support
+- `Tab` / `Shift+Tab` - Cycle panes forward/backward
+- `Ctrl+1/2/3/4` - Jump to Request/Response/Workflow/Logs pane
 - Click on any pane to focus it
 
 ### Layout Controls
 - `F7` - Cycle layout presets (Default → Mixed → Wide → Default)
-- `F8` - Shrink request pane
-- `F9` - Expand request pane
+- `?` - Open/close keymap help overlay
+
+### Pane Resizing
+- `+` / `=` - Expand active pane
+- `-` / `_` - Shrink active pane
+
+Resize applies to the currently focused pane:
+- **Request pane** (Wide layout): changes width
+- **Response pane** (Wide layout): changes height vs logs
+- **Logs pane** (Wide layout): changes height vs response
 
 ### Theme Controls
-- `F10` - Cycle through available themes (dark → light → ...)
-
-### Settings
-- `F6` - Open settings pane
-- `Space` or `Enter` - Toggle boolean settings
-- `Esc` - Close settings
+- `T` / `Shift+T` - Cycle through available themes (dark → light → ...)
 
 ### Request Pane
 - `Tab` - Move between fields (Method → URL → Tabs)
@@ -138,7 +137,7 @@ When using `terminal_default` theme, Yinx inherits the terminal's background col
 ```
 
 2. Save to `~/.config/yinx/themes/my_custom.json`
-3. Press `F6` to open Settings
+3. Settings can be opened from the command palette (future) or by editing `~/.config/yinx/config.toml` directly
 4. Select "theme" and enter `my_custom`
 5. Press `Enter` to apply
 
