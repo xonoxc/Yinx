@@ -24,11 +24,11 @@ use crate::theme::{Theme, ThemeRegistry};
 use crate::widgets::StatusBar;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 use yinx_core::response::{Response, ResponseBody};
+#[cfg(test)]
+use yinx_core::state::UiState;
 use yinx_core::state::{ActivePane, InputMode, NetworkState};
 use yinx_core::timing::{RequestMetrics, Timing};
 use yinx_http::client::HttpClient;
-#[cfg(test)]
-use yinx_core::state::UiState;
 
 use crate::input::InputHandler;
 
@@ -65,9 +65,7 @@ pub async fn run_tui() -> Result<(), AppError> {
             break;
         }
 
-        if event::poll(Duration::from_millis(50))
-            .map_err(|e| AppError::EventLoop(e.to_string()))?
-        {
+        if event::poll(Duration::from_millis(50)).map_err(|e| AppError::EventLoop(e.to_string()))? {
             let event = event::read().map_err(|e| AppError::EventLoop(e.to_string()))?;
             shell.handle_event(event).await?;
         }
@@ -171,24 +169,49 @@ impl TuiShell {
             "Tab: panes | ^R: send | Esc/q: quit | /: search",
         );
 
-        let mut theme_registry = ThemeRegistry::new();
-        theme_registry.register("dark".to_string(), Theme::dark());
-        theme_registry.register("light".to_string(), Theme::light());
-        theme_registry.set_current("dark");
+        let mut theme_registry = ThemeRegistry::with_defaults();
+        let settings_pane = SettingsPane::new();
+        let configured_theme = settings_pane.config.theme.clone();
+        if theme_registry.get(&configured_theme).is_some() {
+            theme_registry.set_current(&configured_theme);
+        }
+        let theme = theme_registry
+            .current()
+            .cloned()
+            .unwrap_or_else(Theme::terminal_default);
 
         Self {
-            theme: Theme::dark(),
+            theme,
             theme_registry,
             layout,
             request_pane: RequestPane::new(),
             logs_pane,
-            settings_pane: SettingsPane::new(),
+            settings_pane,
             active_pane: ActivePane::Request,
             network_state: NetworkState::Idle,
             latest_response: None,
             latest_error: None,
             should_quit: false,
             input_handler: InputHandler::new(),
+        }
+    }
+
+    fn apply_theme_name(&mut self, name: &str) {
+        if let Some(theme) = Theme::get_by_name(name) {
+            self.theme_registry.set_current(&theme.name);
+            self.settings_pane.config.theme = theme.name.clone();
+            self.theme = theme;
+        }
+    }
+
+    fn handle_settings_event(&mut self, event: AppEvent) {
+        match event {
+            AppEvent::SettingsChanged { key, value } | AppEvent::ConfigChanged { key, value } => {
+                if key == "theme" && !value.is_empty() {
+                    self.apply_theme_name(&value);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -212,12 +235,14 @@ impl TuiShell {
     }
 
     fn handle_mouse_event(&mut self, mouse_event: crossterm::event::MouseEvent) {
-        if mouse_event.kind != crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+        if mouse_event.kind
+            != crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left)
+        {
             return;
         }
 
         let rects = self.layout.calculate();
-        
+
         // Check which pane was clicked based on coordinates
         if self.is_in_rect(mouse_event.column, mouse_event.row, rects.response) {
             self.active_pane = ActivePane::Response;
@@ -250,7 +275,9 @@ impl TuiShell {
                 }
                 _ => {
                     if let Some(event) = key_to_app_event(key_event) {
-                        let _ = self.settings_pane.handle_event(&event);
+                        for event in self.settings_pane.handle_event(&event) {
+                            self.handle_settings_event(event);
+                        }
                     }
                     return Ok(());
                 }
@@ -312,8 +339,14 @@ impl TuiShell {
                 AppEvent::SearchActivated => {
                     handled = true;
                 }
-                AppEvent::ThemeChanged(_) => {
-                    self.theme = self.theme_registry.cycle_next().clone();
+                AppEvent::ThemeChanged(name) => {
+                    if name == "next" {
+                        let theme = self.theme_registry.cycle_next().clone();
+                        self.settings_pane.config.theme = theme.name.clone();
+                        self.theme = theme;
+                    } else {
+                        self.apply_theme_name(&name);
+                    }
                     handled = true;
                 }
                 _ => {}
@@ -328,7 +361,10 @@ impl TuiShell {
         Ok(())
     }
 
-    async fn execute_request_with(&mut self, request: yinx_core::request::Request) -> Result<(), AppError> {
+    async fn execute_request_with(
+        &mut self,
+        request: yinx_core::request::Request,
+    ) -> Result<(), AppError> {
         let timeout_secs = self.settings_pane.config.defaults.default_timeout_secs;
         let follow_redirects = self.settings_pane.config.defaults.follow_redirects;
         let verify_tls = self.settings_pane.config.defaults.verify_tls;
@@ -485,13 +521,28 @@ impl TuiShell {
 
         let outer = Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(self.theme.border.color.as_color()));
+            .border_style(Style::default().fg(self.theme.border.color.as_color()))
+            .style(
+                Style::default().bg(self
+                    .theme
+                    .background
+                    .as_ref()
+                    .map(|c| c.as_color())
+                    .unwrap_or(ratatui::style::Color::Reset)),
+            );
         let inner = outer.inner(area);
         frame.render_widget(outer, area);
 
         let saved = self.layout.terminal_size();
         self.layout.update_terminal_size(inner.width, inner.height);
-        let pane_rects = self.layout.calculate();
+        let pane_rects = self
+            .layout
+            .calculate_with_context(crate::layout::LayoutContext {
+                show_logs: true,
+                compact_logs: self.logs_pane.should_compact()
+                    && self.active_pane != ActivePane::Logs
+                    && self.network_state == NetworkState::Idle,
+            });
         self.layout.update_terminal_size(saved.0, saved.1);
 
         let off = |mut r: ratatui::layout::Rect| {
@@ -525,9 +576,22 @@ impl TuiShell {
             InputMode::Visual => "VISUAL",
             InputMode::Command => "COMMAND",
         };
+        let response_meta = self
+            .latest_response
+            .as_ref()
+            .map(|response| format!("{} {}ms", response.status, response.timing_ms))
+            .unwrap_or_else(|| "No response".to_string());
+        let focus_label = match self.active_pane {
+            ActivePane::Request => "REQUEST CONFIG",
+            ActivePane::Response => "RESPONSE",
+            ActivePane::Logs => "ACTIVITY",
+            _ => "YINX",
+        };
         let status = StatusBar::new(mode_str)
             .with_network_state(&self.network_state)
             .with_cursor(0, 0)
+            .with_center(focus_label)
+            .with_right(&response_meta)
             .with_hints(vec![
                 ("Tab", "Panes"),
                 ("^R", "Send"),
@@ -537,27 +601,21 @@ impl TuiShell {
         status.render(frame, off(pane_rects.status_bar), &self.theme);
 
         if self.settings_pane.is_open() {
-            self.settings_pane.render(frame, centered_rect(area, 70, 70));
+            self.settings_pane
+                .render(frame, centered_rect(area, 70, 70), &self.theme);
         }
     }
 
-    fn render_response_pane(
-        &self,
-        frame: &mut ratatui::Frame<'_>,
-        area: Rect,
-        is_active: bool,
-    ) {
-        let border_color = if is_active {
-            self.theme.border.active_color.as_color()
-        } else {
-            self.theme.border.color.as_color()
-        };
-
+    fn render_response_pane(&self, frame: &mut ratatui::Frame<'_>, area: Rect, is_active: bool) {
         let block = Block::default()
-            .title("Response")
+            .title(if let Some(response) = &self.latest_response {
+                format!("RESPONSE  {}  {}ms", response.status, response.timing_ms)
+            } else {
+                "RESPONSE".to_string()
+            })
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(self.theme.pane.bg_color()));
+            .border_style(Style::default().fg(self.theme.border_color(is_active)))
+            .style(Style::default().bg(self.theme.pane_bg(is_active)).fg(self.theme.foreground.as_color()));
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -579,33 +637,71 @@ impl TuiShell {
         }
 
         if let Some(response) = &self.latest_response {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("Status: {}", response.status),
-                Style::default().fg(if response.is_error() {
-                    self.theme.semantic.error.as_color()
-                } else {
-                    self.theme.semantic.success.as_color()
-                }),
-            )));
-            lines.push(Line::from(format!("Time: {} ms", response.timing_ms)));
-            lines.push(Line::from(format!("Body: {} bytes", response.body_size())));
-            if let Some(content_type) = response.content_type() {
-                lines.push(Line::from(format!("Content-Type: {content_type}")));
-            }
+            lines.push(Line::from(vec![
+                Span::styled("Status ", Style::default().fg(self.theme.muted_color())),
+                Span::styled(
+                    response.status.to_string(),
+                    Style::default().fg(if response.is_error() {
+                        self.theme.semantic.error.as_color()
+                    } else {
+                        self.theme.semantic.success.as_color()
+                    }),
+                ),
+                Span::raw("   "),
+                Span::styled("Size ", Style::default().fg(self.theme.muted_color())),
+                Span::styled(
+                    format!("{}b", response.body_size()),
+                    Style::default().fg(self.theme.foreground.as_color()),
+                ),
+                Span::raw("   "),
+                Span::styled("Type ", Style::default().fg(self.theme.muted_color())),
+                Span::styled(
+                    response.content_type().unwrap_or("unknown").to_string(),
+                    Style::default().fg(self.theme.foreground.as_color()),
+                ),
+            ]));
             lines.push(Line::from(""));
 
             for line in response_body_preview(response).lines().take(20) {
                 lines.push(Line::from(line.to_string()));
             }
         } else {
-            lines.push(Line::from("Press F5 to send the current request."));
-            lines.push(Line::from("The request pane is live: type directly into the URL, headers, body, auth, or params fields."));
+            lines.push(Line::from(Span::styled(
+                "No response yet.",
+                Style::default()
+                    .fg(self.theme.title_color(is_active))
+                    .add_modifier(ratatui::style::Modifier::BOLD),
+            )));
+            lines.push(Line::from(Span::styled(
+                "Build the request on the left, send it, and the preview will land here.",
+                Style::default().fg(self.theme.placeholder_color()),
+            )));
             lines.push(Line::from(""));
-            lines.push(Line::from(format!(
-                "Current request: {} {}",
-                self.request_pane.method(),
-                self.request_pane.url()
+            lines.push(Line::from(vec![
+                Span::styled("Method ", Style::default().fg(self.theme.muted_color())),
+                Span::styled(
+                    self.request_pane.method().to_string(),
+                    Style::default().fg(self.theme.foreground.as_color()),
+                ),
+            ]));
+            lines.push(Line::from(vec![
+                Span::styled("URL    ", Style::default().fg(self.theme.muted_color())),
+                Span::styled(
+                    {
+                        let url = self.request_pane.url();
+                        if url.is_empty() {
+                            "https://api.example.com".to_string()
+                        } else {
+                            url
+                        }
+                    },
+                    Style::default().fg(self.theme.foreground.as_color()),
+                ),
+            ]));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "Hints: Tab switch panes, / search logs, Ctrl+R send request.",
+                Style::default().fg(self.theme.placeholder_color()),
             )));
         }
 
@@ -629,7 +725,10 @@ fn key_to_app_event(key_event: KeyEvent) -> Option<AppEvent> {
 
 fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
     let width = area.width.saturating_mul(width_percent).saturating_div(100);
-    let height = area.height.saturating_mul(height_percent).saturating_div(100);
+    let height = area
+        .height
+        .saturating_mul(height_percent)
+        .saturating_div(100);
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect::new(x, y, width.max(1), height.max(1))
@@ -1075,17 +1174,17 @@ mod tests {
         assert!(flag.load(Ordering::SeqCst));
     }
 
-     #[test]
-     fn test_terminal_guard_suspend_is_noop_when_inactive() {
-         let mut guard = TerminalGuard { raw_mode: false };
-         assert!(guard.suspend().is_ok());
-         assert!(!guard.raw_mode);
-     }
+    #[test]
+    fn test_terminal_guard_suspend_is_noop_when_inactive() {
+        let mut guard = TerminalGuard { raw_mode: false };
+        assert!(guard.suspend().is_ok());
+        assert!(!guard.raw_mode);
+    }
 
     #[test]
     fn test_theme_changed_event_updates_theme() {
-        let shell = TuiShell::new(80, 24);
-         
+        let _shell = TuiShell::new(80, 24);
+
         // Simulate receiving ThemeChanged event
         let event = AppEvent::ThemeChanged("light".to_string());
         // This will need to be handled in handle_event
@@ -1096,32 +1195,34 @@ mod tests {
         }
     }
 
-     #[test]
-     fn test_t_key_cycles_theme() {
-         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-         let mut handler = InputHandler::new();
-         let key = KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE);
-         let events = handler.handle_key(key);
-         assert!(events.iter().any(|e| matches!(e, AppEvent::ThemeChanged(_))));
-     }
+    #[test]
+    fn test_t_key_cycles_theme() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut handler = InputHandler::new();
+        let key = KeyEvent::new(KeyCode::Char('T'), KeyModifiers::NONE);
+        let events = handler.handle_key(key);
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AppEvent::ThemeChanged(_))));
+    }
 
-     #[test]
-     fn test_mouse_click_focuses_pane() {
-         let mut shell = TuiShell::new(80, 24);
-         let rects = shell.layout.calculate();
-         
-         // Click in the middle of Response pane
-         let row = rects.response.y + rects.response.height / 2;
-         let col = rects.response.x + rects.response.width / 2;
-         
-         let mouse_event = crossterm::event::MouseEvent {
-             kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
-             column: col,
-             row,
-             modifiers: crossterm::event::KeyModifiers::NONE,
-         };
-         
-         shell.handle_mouse_event(mouse_event);
-         assert_eq!(shell.active_pane, ActivePane::Response);
-     }
+    #[test]
+    fn test_mouse_click_focuses_pane() {
+        let mut shell = TuiShell::new(80, 24);
+        let rects = shell.layout.calculate();
+
+        // Click in the middle of Response pane
+        let row = rects.response.y + rects.response.height / 2;
+        let col = rects.response.x + rects.response.width / 2;
+
+        let mouse_event = crossterm::event::MouseEvent {
+            kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: col,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        };
+
+        shell.handle_mouse_event(mouse_event);
+        assert_eq!(shell.active_pane, ActivePane::Response);
+    }
 }

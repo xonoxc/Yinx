@@ -1,8 +1,8 @@
 //! Observability metrics collection for aggregated request statistics.
 
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::timing::RequestMetrics;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Collects and aggregates request metrics across multiple requests.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

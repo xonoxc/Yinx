@@ -240,9 +240,18 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("BackTab", &[]), KeyAction::CyclePanePrev);
 
         // Direct pane access (Ctrl+number)
-        bindings.insert(KeyBinding::new("1", &["Ctrl"]), KeyAction::SwitchPaneRequest);
-        bindings.insert(KeyBinding::new("2", &["Ctrl"]), KeyAction::SwitchPaneResponse);
-        bindings.insert(KeyBinding::new("3", &["Ctrl"]), KeyAction::SwitchPaneWorkflow);
+        bindings.insert(
+            KeyBinding::new("1", &["Ctrl"]),
+            KeyAction::SwitchPaneRequest,
+        );
+        bindings.insert(
+            KeyBinding::new("2", &["Ctrl"]),
+            KeyAction::SwitchPaneResponse,
+        );
+        bindings.insert(
+            KeyBinding::new("3", &["Ctrl"]),
+            KeyAction::SwitchPaneWorkflow,
+        );
         bindings.insert(KeyBinding::new("4", &["Ctrl"]), KeyAction::SwitchPaneLogs);
 
         // Mode switching
@@ -270,22 +279,22 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("Backspace", &[]), KeyAction::DeleteChar);
         bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::DeleteWord);
 
-         // Actions
-         bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
-         bindings.insert(KeyBinding::new("r", &["Ctrl"]), KeyAction::SendRequest);
-         bindings.insert(KeyBinding::new("Enter", &["Ctrl"]), KeyAction::SendRequest);
-         bindings.insert(KeyBinding::new("c", &["Ctrl"]), KeyAction::Quit);
+        // Actions
+        bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
+        bindings.insert(KeyBinding::new("r", &["Ctrl"]), KeyAction::SendRequest);
+        bindings.insert(KeyBinding::new("Enter", &["Ctrl"]), KeyAction::SendRequest);
+        bindings.insert(KeyBinding::new("c", &["Ctrl"]), KeyAction::Quit);
 
-         // Tab switching (Shift+h/l)
-         bindings.insert(KeyBinding::new("h", &["Shift"]), KeyAction::SwitchTabLeft);
-         bindings.insert(KeyBinding::new("l", &["Shift"]), KeyAction::SwitchTabRight);
+        // Tab switching (Shift+h/l)
+        bindings.insert(KeyBinding::new("h", &["Shift"]), KeyAction::SwitchTabLeft);
+        bindings.insert(KeyBinding::new("l", &["Shift"]), KeyAction::SwitchTabRight);
 
-         // Search
-         bindings.insert(KeyBinding::new("/", &[]), KeyAction::Search);
+        // Search
+        bindings.insert(KeyBinding::new("/", &[]), KeyAction::Search);
 
-         // Theme cycling (Shift+t — never bind single-letter typing keys)
-         bindings.insert(KeyBinding::new("T", &[]), KeyAction::CycleTheme);
-         bindings.insert(KeyBinding::new("t", &["Shift"]), KeyAction::CycleTheme);
+        // Theme cycling (Shift+t — never bind single-letter typing keys)
+        bindings.insert(KeyBinding::new("T", &[]), KeyAction::CycleTheme);
+        bindings.insert(KeyBinding::new("t", &["Shift"]), KeyAction::CycleTheme);
 
         Self { bindings }
     }
@@ -494,10 +503,17 @@ impl InputHandler {
                     events.push(AppEvent::ModeChanged(InputMode::Normal));
                     match c {
                         'r' => events.push(AppEvent::ExecuteRequest),
-                        '1' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Request)),
-                        '2' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Response)),
-                        '3' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs)),
-                        '4' => events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs)),
+                        '1' => events
+                            .push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Request)),
+                        '2' => events.push(AppEvent::PaneChanged(
+                            yinx_core::state::ActivePane::Response,
+                        )),
+                        '3' => {
+                            events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs))
+                        }
+                        '4' => {
+                            events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs))
+                        }
                         'c' => events.push(AppEvent::Quit),
                         _ => return vec![],
                     }
@@ -884,18 +900,12 @@ mod tests {
         // Tab cycles to next pane (Response)
         let event = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
         let events = handler.handle_key(event);
-        assert!(matches!(
-            events[0],
-            AppEvent::CyclePaneNext
-        ));
+        assert!(matches!(events[0], AppEvent::CyclePaneNext));
 
         // Shift+Tab cycles to previous pane (Logs)
         let event = KeyEvent::new(KeyCode::BackTab, KeyModifiers::NONE);
         let events = handler.handle_key(event);
-        assert!(matches!(
-            events[0],
-            AppEvent::CyclePanePrev
-        ));
+        assert!(matches!(events[0], AppEvent::CyclePanePrev));
 
         // Ctrl+1 switches directly to Request pane
         let event = KeyEvent::new(KeyCode::Char('1'), KeyModifiers::CONTROL);

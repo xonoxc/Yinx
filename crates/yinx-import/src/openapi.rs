@@ -329,13 +329,11 @@ fn add_operation_requests(
             // For template URLs (containing {), don't validate with RequestUrl
             let req_url = if url_to_parse.contains('{') {
                 // Create RequestUrl with template
-                RequestUrl::new(&url_to_parse).unwrap_or_else(|_| {
-                    RequestUrl::new("https://example.com").unwrap()
-                })
+                RequestUrl::new(&url_to_parse)
+                    .unwrap_or_else(|_| RequestUrl::new("https://example.com").unwrap())
             } else {
-                RequestUrl::new(&url_to_parse).unwrap_or_else(|_| {
-                    RequestUrl::new("https://example.com").unwrap()
-                })
+                RequestUrl::new(&url_to_parse)
+                    .unwrap_or_else(|_| RequestUrl::new("https://example.com").unwrap())
             };
 
             requests.push(Request {

@@ -1,13 +1,15 @@
 use std::path::PathBuf;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use yinx_core::config::{discover_config, Config};
 use yinx_core::events::AppEvent;
+
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SettingsMode {
@@ -193,7 +195,7 @@ impl SettingsPane {
 
         match key.as_str() {
             "theme" => {
-                self.config.theme = value;
+                self.config.theme = value.clone();
             }
             "default_timeout_secs" => {
                 if let Ok(v) = value.parse() {
@@ -216,17 +218,17 @@ impl SettingsPane {
                 }
             }
             _ => {
-                self.config.keybindings.insert(key.clone(), value);
+                self.config.keybindings.insert(key.clone(), value.clone());
             }
         }
 
         self.mode = SettingsMode::Viewing;
         self.edit_buffer.clear();
         self.message = Some("Setting updated".to_string());
-        
+
         events.push(AppEvent::ConfigChanged {
             key: self.setting_key_at(index),
-            value: self.edit_buffer.clone(),
+            value,
         });
         events
     }
@@ -246,8 +248,7 @@ impl SettingsPane {
     }
 
     pub fn get_theme_list(&self) -> Vec<String> {
-        // Return available themes from config
-        vec!["dark".to_string(), "light".to_string()]
+        Theme::builtin_theme_names()
     }
 
     pub fn confirm_edit_and_get_events(&mut self, index: usize) -> Vec<AppEvent> {
@@ -271,29 +272,34 @@ impl SettingsPane {
         }
     }
 
-    pub fn render(&self, f: &mut Frame<'_>, area: Rect) {
+    pub fn render(&self, f: &mut Frame<'_>, area: Rect, theme: &Theme) {
         if !self.is_open {
             return;
         }
 
         let block = Block::default()
-            .title("Settings")
+            .title("SETTINGS")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan));
+            .border_style(Style::default().fg(theme.border.active_color.as_color()))
+            .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()));
 
         let inner = block.inner(area);
         f.render_widget(Clear, area);
         f.render_widget(block, area);
 
+        let footer_height = if self.selected_index == 0 { 2 } else { 1 };
+
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Min(0), Constraint::Length(1)])
+            .constraints(vec![Constraint::Min(0), Constraint::Length(footer_height)])
             .split(inner);
 
-        let list_widget = List::new(self.settings_items())
+        let list_widget = List::new(self.settings_items(theme))
+            .style(Style::default().fg(theme.foreground.as_color()))
             .highlight_style(
                 Style::default()
-                    .bg(Color::DarkGray)
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .fg(theme.highlight.selected_fg.as_color())
                     .add_modifier(Modifier::BOLD),
             )
             .highlight_symbol("> ");
@@ -303,10 +309,31 @@ impl SettingsPane {
 
         ratatui::widgets::Widget::render(list_widget, layout[0], f.buffer_mut());
 
-        if let Some(ref msg) = self.message {
-            let msg_widget = Paragraph::new(msg.as_str()).style(Style::default().fg(Color::Yellow));
-            f.render_widget(msg_widget, layout[1]);
-        }
+        let footer = if self.selected_index == 0 {
+            let theme_list = self.get_theme_list().join("  ");
+            let msg = self
+                .message
+                .as_deref()
+                .unwrap_or("Enter a theme name, then press Enter.");
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    msg,
+                    Style::default().fg(theme.semantic.warning.as_color()),
+                )),
+                Line::from(vec![
+                    Span::styled("available: ", Style::default().fg(theme.muted_color())),
+                    Span::styled(theme_list, Style::default().fg(theme.foreground.as_color())),
+                ]),
+            ])
+            .style(Style::default().bg(theme.subtle_bg()))
+        } else {
+            Paragraph::new(self.message.as_deref().unwrap_or("")).style(
+                Style::default()
+                    .bg(theme.subtle_bg())
+                    .fg(theme.semantic.warning.as_color()),
+            )
+        };
+        f.render_widget(footer, layout[1]);
 
         if matches!(self.mode, SettingsMode::Editing(_)) {
             let edit_area = Layout::default()
@@ -315,45 +342,47 @@ impl SettingsPane {
                 .split(layout[0])[0];
 
             let edit_block = Block::default()
-                .title("Edit Value")
+                .title("EDIT VALUE")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_style(Style::default().fg(theme.border.active_color.as_color()))
+                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()));
 
             let edit_para = Paragraph::new(self.edit_buffer.as_str())
                 .block(edit_block)
+                .style(Style::default().fg(theme.foreground.as_color()))
                 .wrap(Wrap { trim: true });
 
             f.render_widget(edit_para, edit_area);
         }
     }
 
-    fn settings_items(&self) -> Vec<ListItem<'_>> {
+    fn settings_items(&self, theme: &Theme) -> Vec<ListItem<'_>> {
         let mut items = vec![
             ListItem::new(Line::from(vec![
-                Span::styled("theme: ", Style::default().fg(Color::Gray)),
+                Span::styled("theme: ", Style::default().fg(theme.muted_color())),
                 Span::raw(&self.config.theme),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("default_timeout_secs: ", Style::default().fg(Color::Gray)),
+                Span::styled("default_timeout_secs: ", Style::default().fg(theme.muted_color())),
                 Span::raw(self.config.defaults.default_timeout_secs.to_string()),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("follow_redirects: ", Style::default().fg(Color::Gray)),
+                Span::styled("follow_redirects: ", Style::default().fg(theme.muted_color())),
                 Span::raw(self.config.defaults.follow_redirects.to_string()),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("verify_tls: ", Style::default().fg(Color::Gray)),
+                Span::styled("verify_tls: ", Style::default().fg(theme.muted_color())),
                 Span::raw(self.config.defaults.verify_tls.to_string()),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("max_history_entries: ", Style::default().fg(Color::Gray)),
+                Span::styled("max_history_entries: ", Style::default().fg(theme.muted_color())),
                 Span::raw(self.config.defaults.max_history_entries.to_string()),
             ])),
         ];
 
         for (key, value) in &self.config.keybindings {
             items.push(ListItem::new(Line::from(vec![
-                Span::styled(format!("{}: ", key), Style::default().fg(Color::Gray)),
+                Span::styled(format!("{}: ", key), Style::default().fg(theme.muted_color())),
                 Span::raw(value),
             ])));
         }
@@ -389,7 +418,7 @@ mod tests {
     fn test_settings_pane_new() {
         let pane = create_test_pane();
         assert!(!pane.is_open());
-        assert_eq!(pane.config.theme, "dark");
+        assert_eq!(pane.config.theme, "terminal");
     }
 
     #[test]
@@ -423,7 +452,7 @@ mod tests {
 
         pane.start_editing();
         assert!(matches!(pane.mode, SettingsMode::Editing(0)));
-        assert_eq!(pane.edit_buffer, "dark");
+        assert_eq!(pane.edit_buffer, "terminal");
     }
 
     #[test]
@@ -477,7 +506,7 @@ mod tests {
         pane.mode = SettingsMode::Viewing;
         pane.edit_buffer.clear();
 
-        assert_eq!(pane.config.theme, "dark");
+        assert_eq!(pane.config.theme, "terminal");
     }
 
     #[test]
@@ -578,7 +607,7 @@ mod tests {
     #[test]
     fn test_settings_pane_config_from_env() {
         let config = Config::default_config().apply_env_overrides();
-        assert_eq!(config.theme, "dark");
+        assert_eq!(config.theme, "terminal");
     }
 
     #[test]
@@ -597,11 +626,14 @@ mod tests {
         pane.open();
         pane.selected_index = 2; // follow_redirects
         pane.start_editing();
-        
+
         // Simulate Space to toggle
         pane.toggle_current_boolean();
-        
-        assert_ne!(pane.config.defaults.follow_redirects, Config::default_config().defaults.follow_redirects);
+
+        assert_ne!(
+            pane.config.defaults.follow_redirects,
+            Config::default_config().defaults.follow_redirects
+        );
     }
 
     // Task 4.3
@@ -610,10 +642,12 @@ mod tests {
         let mut pane = SettingsPane::new();
         pane.open();
         pane.selected_index = 0; // theme
-        
+
         let themes = pane.get_theme_list();
+        assert!(themes.contains(&"terminal".to_string()));
         assert!(themes.contains(&"dark".to_string()));
         assert!(themes.contains(&"light".to_string()));
+        assert!(themes.contains(&"forest".to_string()));
     }
 
     // Task 4.4
@@ -624,8 +658,10 @@ mod tests {
         pane.selected_index = 0;
         pane.start_editing();
         pane.edit_buffer = "light".to_string();
-        
+
         let events = pane.confirm_edit_and_get_events(0);
-        assert!(events.iter().any(|e| matches!(e, AppEvent::ConfigChanged { .. })));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AppEvent::ConfigChanged { .. })));
     }
 }

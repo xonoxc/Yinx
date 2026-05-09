@@ -41,12 +41,6 @@ impl<'a> Panel<'a> {
     }
 
     pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let border_color = if self.is_active {
-            theme.border.active_color.as_color()
-        } else {
-            theme.border.color.as_color()
-        };
-
         let border_type = match self.border_style.or(Some(match theme.border.style {
             crate::theme::BorderType::Plain => BorderType::Plain,
             crate::theme::BorderType::Rounded => BorderType::Rounded,
@@ -61,11 +55,11 @@ impl<'a> Panel<'a> {
         };
 
         let block = Block::default()
-            .title(self.title)
+            .title(self.title.to_uppercase())
             .borders(Borders::ALL)
             .border_type(border_type)
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(theme.pane.bg_color()));
+            .border_style(Style::default().fg(theme.border_color(self.is_active)))
+            .style(Style::default().bg(theme.pane_bg(self.is_active)).fg(theme.foreground.as_color()));
 
         frame.render_widget(block, area);
     }
@@ -104,6 +98,7 @@ impl<'a> ScrollableList<'a> {
             .collect();
 
         let list = List::new(items)
+            .style(Style::default().fg(theme.foreground.as_color()))
             .highlight_style(
                 Style::default()
                     .bg(theme.highlight.selected_bg.as_color())
@@ -122,12 +117,12 @@ impl<'a> ScrollableList<'a> {
                 .title(title)
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()))
+                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()))
         } else {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()))
+                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()))
         };
 
         let list = list.block(block);
@@ -212,7 +207,7 @@ impl<'a> TableWidget<'a> {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color())),
+                    .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
             )
             .row_highlight_style(
                 Style::default()
@@ -262,7 +257,7 @@ impl<'a> TabsWidget<'a> {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color())),
             )
-            .style(Style::default().bg(theme.pane.bg_color()))
+            .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()))
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
@@ -304,12 +299,12 @@ impl<'a> InputField<'a> {
                 .title(title)
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.highlight.bg.as_color()))
+                .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
         } else {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.highlight.bg.as_color()))
+                .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
         };
 
         let paragraph = Paragraph::new(self.content)
@@ -425,24 +420,19 @@ impl<'a> StatusBar<'a> {
 
     pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let mode_span = Span::styled(
-            self.mode,
+            format!(" {} ", self.mode),
             Style::default()
-                .fg(self.mode_color(theme))
+                .fg(theme.pane.status_bar_bg.as_color())
+                .bg(self.mode_color(theme))
                 .add_modifier(Modifier::BOLD),
         );
 
         let network_span = Span::styled(
-            self.network_status_text(),
+            format!("{} ", self.network_status_text()),
             Style::default()
                 .fg(self.network_status_color(theme))
                 .add_modifier(Modifier::BOLD),
         );
-
-        let cursor_span = Span::raw(format!(
-            "Ln {}, Col {}",
-            self.cursor_line + 1,
-            self.cursor_col + 1
-        ));
 
         let hint_spans: Vec<Span> = self
             .hints
@@ -450,21 +440,37 @@ impl<'a> StatusBar<'a> {
             .flat_map(|(key, desc)| {
                 vec![
                     Span::styled(*key, Style::default().fg(theme.semantic.warning.as_color())),
-                    Span::raw(": "),
+                    Span::raw(" "),
                     Span::styled(*desc, Style::default().fg(theme.foreground.as_color())),
                     Span::raw("  "),
                 ]
             })
             .collect();
 
-        let mut line = vec![
-            mode_span,
-            Span::raw(" | "),
-            network_span,
-            Span::raw(" | "),
-            cursor_span,
-            Span::raw(" | "),
-        ];
+        let mut line = vec![mode_span, Span::raw(" "), network_span];
+
+        if !self.center.is_empty() {
+            line.push(Span::styled(
+                format!("• {} ", self.center),
+                Style::default().fg(theme.title_color(false)),
+            ));
+        }
+
+        if !self.right.is_empty() {
+            line.push(Span::styled(
+                format!("• {} ", self.right),
+                Style::default().fg(theme.foreground.as_color()),
+            ));
+        }
+
+        line.push(Span::styled(
+            format!(
+                "• Ln {}, Col {}  ",
+                self.cursor_line + 1,
+                self.cursor_col + 1
+            ),
+            Style::default().fg(theme.muted_color()),
+        ));
         line.extend(hint_spans);
 
         let paragraph = Paragraph::new(Line::from(line))
@@ -628,7 +634,7 @@ impl TimelineWidget {
                     .title(self.title.as_str())
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color())),
+                    .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
             )
             .style(Style::default().fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: true });
@@ -995,7 +1001,7 @@ mod tests {
             .with_left("Yinx")
             .with_center("GET https://example.com")
             .with_right("100ms");
-        
+
         assert_eq!(bar.left, "Yinx");
         assert_eq!(bar.center, "GET https://example.com");
         assert_eq!(bar.right, "100ms");
@@ -1012,7 +1018,7 @@ mod tests {
     fn test_statusline_shows_response_info() {
         let mut bar = StatusBar::new("NORMAL");
         bar.set_response_info(200, 150);
-        
+
         assert_eq!(bar.status_code, Some(200));
         assert_eq!(bar.response_time_ms, Some(150));
     }

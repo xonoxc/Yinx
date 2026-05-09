@@ -12,7 +12,7 @@ use ratatui::{
 use std::collections::VecDeque;
 
 use yinx_core::metrics::MetricsCollector;
-use yinx_core::request::{Request, request_to_curl};
+use yinx_core::request::{request_to_curl, Request};
 use yinx_core::timing::RequestMetrics;
 
 use crate::theme::Theme;
@@ -251,6 +251,21 @@ impl LogsPane {
         self.selected_error = 0;
     }
 
+    pub fn log_count(&self) -> usize {
+        self.logs.len()
+    }
+
+    pub fn latest_entry(&self) -> Option<&LogEntry> {
+        self.logs.back()
+    }
+
+    pub fn should_compact(&self) -> bool {
+        self.logs.len() <= 2
+            && self.metrics.is_none()
+            && self.errors.is_empty()
+            && self.current_request.is_none()
+    }
+
     pub fn handle_key(&mut self, key_code: KeyCode, _modifiers: KeyModifiers) -> bool {
         match self.focused_field {
             FocusedField::Tabs => self.handle_tabs_key(key_code),
@@ -386,48 +401,81 @@ impl LogsPane {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        let border_color = if is_active {
-            theme.border.active_color.as_color()
-        } else {
-            theme.border.color.as_color()
-        };
-
         let block = Block::default()
-            .title("Logs / Metrics")
+            .title("ACTIVITY")
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(theme.pane.bg_color()));
+            .border_type(BorderType::Plain)
+            .border_style(Style::default().fg(theme.border_color(is_active)))
+            .style(Style::default().bg(theme.pane_bg(is_active)).fg(theme.foreground.as_color()));
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
+        if area.height <= 4 || (self.should_compact() && !is_active) {
+            self.render_compact(frame, inner, theme);
+            return;
+        }
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Length(3), Constraint::Min(0)])
+            .constraints(vec![Constraint::Length(1), Constraint::Min(0)])
             .split(inner);
 
         self.render_tabs(frame, chunks[0], theme);
         self.render_content(frame, chunks[1], theme, is_active);
     }
 
+    fn render_compact(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let latest = self
+            .latest_entry()
+            .map(|entry| entry.message.as_str())
+            .unwrap_or("No activity yet");
+        let summary = Line::from(vec![
+            Span::styled(
+                format!("{} logs", self.log_count()),
+                Style::default()
+                    .fg(theme.title_color(false))
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("  "),
+            Span::styled(
+                format!("{} errors", self.errors.len()),
+                Style::default().fg(if self.errors.is_empty() {
+                    theme.muted_color()
+                } else {
+                    theme.semantic.error.as_color()
+                }),
+            ),
+            Span::raw("  "),
+            Span::styled(latest, Style::default().fg(theme.placeholder_color())),
+        ]);
+
+        let paragraph = Paragraph::new(summary)
+            .style(
+                Style::default()
+                    .bg(theme.subtle_bg())
+                    .fg(theme.foreground.as_color()),
+            )
+            .wrap(Wrap { trim: true });
+        frame.render_widget(paragraph, area);
+    }
+
     fn render_tabs(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let titles: Vec<Line> = LogsTab::all()
             .iter()
-            .map(|t| Line::from(t.as_str()))
+            .map(|t| Line::from(t.as_str().to_uppercase()))
             .collect();
 
         let tabs = Tabs::new(titles)
             .select(self.selected_tab)
             .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color())),
+                Block::default().border_style(Style::default().fg(theme.border.color.as_color())),
             )
-            .style(Style::default().bg(theme.pane.bg_color()))
+            .style(Style::default().bg(theme.subtle_bg()).fg(theme.foreground.as_color()))
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
+                    .bg(theme.highlight.selected_bg.as_color())
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             );
 
@@ -517,19 +565,20 @@ impl LogsPane {
 
         if total_requests > 0 {
             // Title
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "=== Performance Summary ===",
-                    Style::default()
-                        .fg(theme.foreground.as_color())
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "=== Performance Summary ===",
+                Style::default()
+                    .fg(theme.foreground.as_color())
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            )]));
             lines.push(Line::from(""));
 
             // Total requests
             lines.push(Line::from(vec![
-                Span::styled("Total Requests: ", Style::default().fg(theme.foreground.as_color())),
+                Span::styled(
+                    "Total Requests: ",
+                    Style::default().fg(theme.foreground.as_color()),
+                ),
                 Span::styled(
                     total_requests.to_string(),
                     Style::default().fg(theme.semantic.info.as_color()),
@@ -544,16 +593,24 @@ impl LogsPane {
                 theme.semantic.info.as_color()
             };
             lines.push(Line::from(vec![
-                Span::styled("Error Rate: ", Style::default().fg(theme.foreground.as_color())),
+                Span::styled(
+                    "Error Rate: ",
+                    Style::default().fg(theme.foreground.as_color()),
+                ),
                 Span::styled(
                     format!("{:.1}%", error_rate),
-                    Style::default().fg(error_color).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(error_color)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]));
 
             // Total errors
             lines.push(Line::from(vec![
-                Span::styled("Total Errors: ", Style::default().fg(theme.foreground.as_color())),
+                Span::styled(
+                    "Total Errors: ",
+                    Style::default().fg(theme.foreground.as_color()),
+                ),
                 Span::styled(
                     collector.total_errors().to_string(),
                     Style::default().fg(theme.semantic.error.as_color()),
@@ -563,7 +620,10 @@ impl LogsPane {
             // Average TTFB
             if let Some(avg_ttfb) = collector.avg_ttfb() {
                 lines.push(Line::from(vec![
-                    Span::styled("Avg TTFB: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        "Avg TTFB: ",
+                        Style::default().fg(theme.foreground.as_color()),
+                    ),
                     Span::styled(
                         format!("{:.1}ms", avg_ttfb),
                         Style::default().fg(theme.semantic.info.as_color()),
@@ -574,7 +634,10 @@ impl LogsPane {
             // Average Duration
             if let Some(avg_dur) = collector.avg_duration() {
                 lines.push(Line::from(vec![
-                    Span::styled("Avg Duration: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        "Avg Duration: ",
+                        Style::default().fg(theme.foreground.as_color()),
+                    ),
                     Span::styled(
                         format!("{:.1}ms", avg_dur),
                         Style::default().fg(theme.semantic.info.as_color()),
@@ -608,7 +671,10 @@ impl LogsPane {
             let (total_retries, _) = collector.retry_summary();
             if total_retries > 0 {
                 lines.push(Line::from(vec![
-                    Span::styled("Total Retries: ", Style::default().fg(theme.foreground.as_color())),
+                    Span::styled(
+                        "Total Retries: ",
+                        Style::default().fg(theme.foreground.as_color()),
+                    ),
                     Span::styled(
                         total_retries.to_string(),
                         Style::default().fg(theme.semantic.warning.as_color()),
@@ -617,14 +683,12 @@ impl LogsPane {
             }
 
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled(
-                    "=== Current Request ===",
-                    Style::default()
-                        .fg(theme.foreground.as_color())
-                        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
-                ),
-            ]));
+            lines.push(Line::from(vec![Span::styled(
+                "=== Current Request ===",
+                Style::default()
+                    .fg(theme.foreground.as_color())
+                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+            )]));
         }
 
         // Current request metrics
@@ -738,7 +802,9 @@ impl LogsPane {
                 ]));
             }
         } else if total_requests == 0 {
-            lines.push(Line::from("No metrics available. Send a request to see metrics."));
+            lines.push(Line::from(
+                "No metrics available. Send a request to see metrics.",
+            ));
         }
 
         let paragraph = Paragraph::new(lines)
@@ -788,7 +854,7 @@ impl LogsPane {
                         .title("Request Duration Histogram (ms)")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color())),
+                        .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
                 )
                 .bar_width(8)
                 .bar_gap(1)
@@ -833,7 +899,7 @@ impl LogsPane {
                         .title("Chunk Interval Histogram (ms)")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color())),
+                        .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
                 )
                 .bar_width(8)
                 .bar_gap(1)
@@ -866,16 +932,17 @@ impl LogsPane {
         let collector = &self.metrics_collector;
 
         if collector.total_requests() == 0 {
-            let paragraph =
-                Paragraph::new("No request data available. Send requests to see status code distribution.")
-                    .style(Style::default().fg(theme.foreground.as_color()))
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(theme.border.color.as_color()))
-                            .style(Style::default().bg(theme.pane.bg_color())),
-                    )
-                    .alignment(Alignment::Center);
+            let paragraph = Paragraph::new(
+                "No request data available. Send requests to see status code distribution.",
+            )
+            .style(Style::default().fg(theme.foreground.as_color()))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.bg_color())),
+            )
+            .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
             return;
@@ -897,7 +964,7 @@ impl LogsPane {
                         .title("Status Code Distribution")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color())),
+                        .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
                 )
                 .bar_width(8)
                 .bar_gap(1)
@@ -992,7 +1059,12 @@ impl LogsPane {
             let curl_cmd = request_to_curl(request);
             let lines: Vec<Line> = curl_cmd
                 .lines()
-                .map(|line| Line::from(vec![Span::styled(line, Style::default().fg(theme.foreground.as_color()))]))
+                .map(|line| {
+                    Line::from(vec![Span::styled(
+                        line,
+                        Style::default().fg(theme.foreground.as_color()),
+                    )])
+                })
                 .collect();
 
             let paragraph = Paragraph::new(lines)
@@ -1001,21 +1073,23 @@ impl LogsPane {
                         .title("Curl Equivalent")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color())),
+                        .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
                 )
                 .wrap(Wrap { trim: true });
             frame.render_widget(paragraph, area);
         } else {
-            let paragraph = Paragraph::new("No request available. Create a request to see the curl equivalent.")
-                .style(Style::default().fg(theme.foreground.as_color()))
-                .block(
-                    Block::default()
-                        .title("Curl Equivalent")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color())),
-                )
-                .alignment(Alignment::Center);
+            let paragraph = Paragraph::new(
+                "No request available. Create a request to see the curl equivalent.",
+            )
+            .style(Style::default().fg(theme.foreground.as_color()))
+            .block(
+                Block::default()
+                    .title("Curl Equivalent")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
+            )
+            .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }
     }

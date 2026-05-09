@@ -66,6 +66,21 @@ pub struct PaneRects {
     pub status_bar: Rect,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LayoutContext {
+    pub show_logs: bool,
+    pub compact_logs: bool,
+}
+
+impl Default for LayoutContext {
+    fn default() -> Self {
+        Self {
+            show_logs: true,
+            compact_logs: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LayoutState {
     pub config: LayoutConfig,
@@ -173,6 +188,10 @@ impl Layout {
     }
 
     pub fn calculate(&self) -> PaneRects {
+        self.calculate_with_context(LayoutContext::default())
+    }
+
+    pub fn calculate_with_context(&self, context: LayoutContext) -> PaneRects {
         let (term_width, term_height) = self.terminal_size;
         let constraints = &self.state.constraints;
 
@@ -180,16 +199,27 @@ impl Layout {
         let available_height = term_height.saturating_sub(status_bar_height);
 
         match self.state.config.preset {
-            LayoutPreset::Mixed => {
-                self.calculate_mixed(term_width, available_height, status_bar_height, constraints)
-            }
-            _ => {
-                if self.state.config.horizontal_split {
-                    self.calculate_horizontal(term_width, available_height, status_bar_height, constraints)
-                } else {
-                    self.calculate_vertical(term_width, available_height, status_bar_height, constraints)
-                }
-            }
+            LayoutPreset::Mixed => self.calculate_mixed(
+                term_width,
+                available_height,
+                status_bar_height,
+                constraints,
+                context,
+            ),
+            LayoutPreset::Wide => self.calculate_wide(
+                term_width,
+                available_height,
+                status_bar_height,
+                constraints,
+                context,
+            ),
+            LayoutPreset::Default => self.calculate_vertical(
+                term_width,
+                available_height,
+                status_bar_height,
+                constraints,
+                context,
+            ),
         }
     }
 
@@ -199,25 +229,22 @@ impl Layout {
         available_height: u16,
         status_bar_height: u16,
         constraints: &PaneConstraintsMap,
+        context: LayoutContext,
     ) -> PaneRects {
-        let total_ratio = self.state.config.request_pane_ratio
-            + self.state.config.response_pane_ratio
-            + self.state.config.logs_pane_ratio;
+        let logs_height = self.logs_height(available_height, constraints, context);
+        let body_height = available_height.saturating_sub(logs_height);
+
+        let total_ratio =
+            self.state.config.request_pane_ratio + self.state.config.response_pane_ratio;
 
         let req_height = Self::bounded_height(
-            (available_height as f32 * self.state.config.request_pane_ratio / total_ratio) as u16,
+            (body_height as f32 * self.state.config.request_pane_ratio / total_ratio) as u16,
             constraints.request.min_height,
             constraints.request.max_height,
         );
-        let resp_height = Self::bounded_height(
-            (available_height as f32 * self.state.config.response_pane_ratio / total_ratio) as u16,
-            constraints.response.min_height,
-            constraints.response.max_height,
-        );
-        let logs_height = available_height
+        let resp_height = body_height
             .saturating_sub(req_height)
-            .saturating_sub(resp_height)
-            .max(constraints.logs.min_height);
+            .max(constraints.response.min_height);
 
         let areas = RatatuiLayout::default()
             .direction(Direction::Vertical)
@@ -243,18 +270,30 @@ impl Layout {
         available_height: u16,
         status_bar_height: u16,
         constraints: &PaneConstraintsMap,
+        context: LayoutContext,
     ) -> PaneRects {
-        let req_height = (available_height as f32 * 0.3) as u16;
+        let req_height = (available_height as f32 * 0.34) as u16;
         let req_height = req_height.max(constraints.request.min_height);
 
         let bottom_height = available_height.saturating_sub(req_height);
         let status_rect = Rect::new(0, req_height + bottom_height, width, status_bar_height);
 
-        let total_ratio = self.state.config.response_pane_ratio
-            + self.state.config.logs_pane_ratio;
+        if !context.show_logs {
+            return PaneRects {
+                request: Rect::new(0, 0, width, req_height),
+                response: Rect::new(0, req_height, width, bottom_height),
+                logs: Rect::new(0, req_height + bottom_height, 0, 0),
+                status_bar: status_rect,
+            };
+        }
 
-        let resp_width = (width as f32 * self.state.config.response_pane_ratio / total_ratio) as u16;
-        let logs_width = width.saturating_sub(resp_width).max(constraints.logs.min_width);
+        let total_ratio = self.state.config.response_pane_ratio + self.state.config.logs_pane_ratio;
+
+        let resp_width =
+            (width as f32 * self.state.config.response_pane_ratio / total_ratio) as u16;
+        let logs_width = width
+            .saturating_sub(resp_width)
+            .max(constraints.logs.min_width);
 
         let request_rect = Rect::new(0, 0, width, req_height);
         let response_rect = Rect::new(0, req_height, resp_width, bottom_height);
@@ -268,12 +307,13 @@ impl Layout {
         }
     }
 
-    fn calculate_horizontal(
+    fn calculate_wide(
         &self,
         width: u16,
         available_height: u16,
         status_bar_height: u16,
         constraints: &PaneConstraintsMap,
+        context: LayoutContext,
     ) -> PaneRects {
         let status_rect = Rect::new(0, available_height, width, status_bar_height);
 
@@ -282,23 +322,51 @@ impl Layout {
             constraints.request.min_width,
             constraints.request.max_width,
         );
-        let remaining_width = width.saturating_sub(req_width);
-
-        let total = self.state.config.response_pane_ratio
-            + self.state.config.logs_pane_ratio;
-
-        let resp_width = (remaining_width as f32 * self.state.config.response_pane_ratio / total) as u16;
-        let logs_width = remaining_width.saturating_sub(resp_width).max(constraints.logs.min_width);
-
+        let right_width = width.saturating_sub(req_width);
+        let logs_height = self.logs_height(available_height, constraints, context);
+        let response_height = available_height
+            .saturating_sub(logs_height)
+            .max(constraints.response.min_height);
         let request_rect = Rect::new(0, 0, req_width, available_height);
-        let response_rect = Rect::new(req_width, 0, resp_width, available_height);
-        let logs_rect = Rect::new(req_width + resp_width, 0, logs_width, available_height);
+        let response_rect = Rect::new(req_width, 0, right_width, response_height);
+        let logs_rect = if logs_height == 0 {
+            Rect::new(req_width, response_height, 0, 0)
+        } else {
+            Rect::new(req_width, response_height, right_width, logs_height)
+        };
 
         PaneRects {
             request: request_rect,
             response: response_rect,
             logs: logs_rect,
             status_bar: status_rect,
+        }
+    }
+
+    fn logs_height(
+        &self,
+        available_height: u16,
+        constraints: &PaneConstraintsMap,
+        context: LayoutContext,
+    ) -> u16 {
+        if !context.show_logs {
+            return 0;
+        }
+
+        if context.compact_logs {
+            return 4.min(available_height.saturating_sub(constraints.response.min_height));
+        }
+
+        let ratio_height = (available_height as f32 * self.state.config.logs_pane_ratio) as u16;
+        let min_logs_height = constraints.logs.min_height.min(available_height);
+        let max_logs_height = available_height.saturating_sub(constraints.response.min_height);
+
+        if max_logs_height == 0 {
+            0
+        } else if max_logs_height < min_logs_height {
+            max_logs_height
+        } else {
+            ratio_height.clamp(min_logs_height, max_logs_height)
         }
     }
 
@@ -364,19 +432,15 @@ impl Layout {
         }
 
         let constraints = &self.state.constraints;
-        if constraints.request.min_width + constraints.response.min_width > width
-            && self.state.config.horizontal_split
-        {
-            errors.push("Horizontal layout: minimum widths exceed terminal width".to_string());
+        if constraints.request.min_width + constraints.response.min_width > width {
+            errors.push("Wide layout: minimum widths exceed terminal width".to_string());
         }
 
-        if constraints.request.min_height
+        let minimum_stacked_height = constraints.request.min_height
             + constraints.response.min_height
-            + constraints.logs.min_height
-            + constraints.status_bar.min_height
-            > height
-        {
-            errors.push("Vertical layout: minimum heights exceed terminal height".to_string());
+            + constraints.status_bar.min_height;
+        if minimum_stacked_height > height {
+            errors.push("Layout minimum heights exceed terminal height".to_string());
         }
 
         errors
@@ -413,7 +477,11 @@ mod tests {
     // Task 8.1
     #[test]
     fn test_layout_preset_variants() {
-        let presets = vec![LayoutPreset::Default, LayoutPreset::Mixed, LayoutPreset::Wide];
+        let presets = vec![
+            LayoutPreset::Default,
+            LayoutPreset::Mixed,
+            LayoutPreset::Wide,
+        ];
         assert_eq!(presets.len(), 3);
     }
 
@@ -423,7 +491,7 @@ mod tests {
         let mut layout = Layout::with_preset(LayoutPreset::Mixed);
         layout.update_terminal_size(120, 40);
         let rects = layout.calculate();
-        
+
         // Request should be at top, spanning full width
         assert_eq!(rects.request.y, 0);
         // Should be ~30% of 40 = 12, bounded by min_height
@@ -435,7 +503,7 @@ mod tests {
     fn test_f7_cycles_layout_presets() {
         let mut layout = Layout::new();
         let initial = layout.config().preset;
-        
+
         layout.toggle_split_direction(); // This should cycle preset
         assert_ne!(layout.config().preset, initial);
     }
@@ -459,10 +527,8 @@ mod tests {
         let mut layout = Layout::new();
         layout.update_terminal_size(100, 30);
         let rects = layout.calculate();
-        let total_width = rects.request.width
-            + rects.response.width
-            + rects.logs.width;
-        assert_eq!(total_width, 100);
+        assert_eq!(rects.request.width, 30);
+        assert_eq!(rects.response.width, 70);
         assert_eq!(rects.status_bar.y, 29); // Single row at bottom
     }
 
@@ -473,7 +539,7 @@ mod tests {
         let rects = layout.calculate();
         assert!(rects.request.width > 0);
         assert!(rects.response.width > 0);
-        assert!(rects.logs.width > 0);
+        assert!(rects.logs.height > 0);
     }
 
     #[test]
@@ -481,10 +547,33 @@ mod tests {
         let mut layout = Layout::new();
         layout.update_terminal_size(120, 40);
         let rects = layout.calculate();
-        
+
         let gutter = layout.config().gutter;
-        assert_eq!(rects.request.x + rects.request.width + gutter, rects.response.x);
+        assert_eq!(
+            rects.request.x + rects.request.width + gutter,
+            rects.response.x
+        );
+    }
+
+    #[test]
+    fn test_compact_logs_reduce_height() {
+        let mut layout = Layout::new();
+        layout.update_terminal_size(120, 40);
+        let rects = layout.calculate_with_context(LayoutContext {
+            show_logs: true,
+            compact_logs: true,
+        });
+        assert_eq!(rects.logs.height, 4);
+    }
+
+    #[test]
+    fn test_hidden_logs_collapse_area() {
+        let mut layout = Layout::new();
+        layout.update_terminal_size(120, 40);
+        let rects = layout.calculate_with_context(LayoutContext {
+            show_logs: false,
+            compact_logs: false,
+        });
+        assert_eq!(rects.logs.area(), 0);
     }
 }
-
-

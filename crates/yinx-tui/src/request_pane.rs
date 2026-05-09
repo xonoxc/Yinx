@@ -281,6 +281,29 @@ impl RequestPane {
         self.url_buffer.as_str().to_string()
     }
 
+    fn populated_headers(&self) -> usize {
+        self.headers
+            .iter()
+            .filter(|(name, value)| !name.as_str().is_empty() || !value.as_str().is_empty())
+            .count()
+    }
+
+    fn populated_params(&self) -> usize {
+        self.params
+            .iter()
+            .filter(|(name, value)| !name.as_str().is_empty() || !value.as_str().is_empty())
+            .count()
+    }
+
+    fn tab_titles(&self) -> Vec<String> {
+        vec![
+            format!("HEADERS {}", self.populated_headers()),
+            format!("BODY {}", self.body_type.as_str()),
+            format!("AUTH {}", self.auth_type.as_str().to_uppercase()),
+            format!("PARAMS {}", self.populated_params()),
+        ]
+    }
+
     pub fn headers(&self) -> Headers {
         let mut headers = Headers::new();
         for (name_buf, value_buf) in &self.headers {
@@ -1199,25 +1222,12 @@ impl RequestPane {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        let border_color = if is_active {
-            theme.border.active_color.as_color()
-        } else {
-            theme.border.color.as_color()
-        };
-
-        let border_type = match theme.border.style {
-            crate::theme::BorderType::Plain => BorderType::Plain,
-            crate::theme::BorderType::Rounded => BorderType::Rounded,
-            crate::theme::BorderType::Double => BorderType::Double,
-            crate::theme::BorderType::Thick => BorderType::Thick,
-        };
-
         let block = Block::default()
-            .title("Request")
+            .title("REQUEST CONFIG")
             .borders(Borders::ALL)
-            .border_type(border_type)
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(theme.pane.bg_color()));
+            .border_type(BorderType::Plain)
+            .border_style(Style::default().fg(theme.border_color(is_active)))
+            .style(Style::default().bg(theme.pane_bg(is_active)).fg(theme.foreground.as_color()));
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -1270,7 +1280,7 @@ impl RequestPane {
             } else {
                 Style::default().fg(theme.border.color.as_color())
             })
-            .style(Style::default().bg(theme.pane.bg_color()));
+            .style(Style::default().bg(theme.subtle_bg()));
 
         let method_para = Paragraph::new(Line::from(vec![
             Span::styled(method_text, method_style),
@@ -1288,8 +1298,8 @@ impl RequestPane {
             } else {
                 Style::default().fg(theme.border.color.as_color())
             })
-            .style(Style::default().bg(theme.highlight.bg.as_color()))
-            .title("URL");
+            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+            .title(" URL ");
 
         let url_para = Paragraph::new(self.url_buffer.as_str())
             .block(url_block)
@@ -1310,30 +1320,24 @@ impl RequestPane {
     }
 
     fn render_tabs(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        let tabs = RequestTab::all();
-        let titles: Vec<&str> = tabs.iter().map(|t| t.as_str()).collect();
+        let titles: Vec<Line> = self.tab_titles().into_iter().map(Line::from).collect();
 
         let tabs_widget = Tabs::new(titles)
             .select(self.selected_tab)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(
-                        if is_active && self.focused_field == FocusedField::Tabs {
-                            theme.border.active_color.as_color()
-                        } else {
-                            theme.border.color.as_color()
-                        },
-                    )),
-            )
-            .style(Style::default().bg(theme.pane.bg_color()))
+            .block(Block::default().border_style(Style::default().fg(
+                if is_active && self.focused_field == FocusedField::Tabs {
+                    theme.border.active_color.as_color()
+                } else {
+                    theme.border.color.as_color()
+                },
+            )))
+            .style(Style::default().bg(theme.subtle_bg()).fg(theme.foreground.as_color()))
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
                     .bg(theme.highlight.selected_bg.as_color())
                     .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             );
-
         frame.render_widget(tabs_widget, area);
     }
 
@@ -1406,8 +1410,8 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()))
-                .title("Headers (a=add, d=delete, ←→ to switch field)"),
+                .style(Style::default().bg(theme.pane_bg(is_active)).fg(theme.foreground.as_color()))
+                .title(" HEADERS  a add  d delete "),
         )
         .row_highlight_style(
             Style::default()
@@ -1442,14 +1446,14 @@ impl RequestPane {
         };
 
         let type_para = Paragraph::new(Line::from(vec![
-            Span::styled(format!("Type: {}", body_type_str), type_style),
-            Span::raw(" (press 't' to change)"),
+            Span::styled(format!("BODY TYPE {}", body_type_str), type_style),
+            Span::raw("  t cycle"),
         ]))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color())),
+                .style(Style::default().bg(theme.subtle_bg())),
         );
 
         frame.render_widget(type_para, chunks[0]);
@@ -1467,8 +1471,8 @@ impl RequestPane {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.highlight.bg.as_color()))
-                    .title("Body"),
+                    .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+                    .title(" BODY "),
             )
             .style(content_style)
             .wrap(Wrap { trim: false });
@@ -1517,7 +1521,7 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()))
+                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()))
                 .title("Authentication"),
         );
 
@@ -1530,7 +1534,7 @@ impl RequestPane {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(Style::default().fg(theme.border.color.as_color()))
-                            .style(Style::default().bg(theme.pane.bg_color())),
+                            .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
                     )
                     .style(Style::default().fg(theme.foreground.as_color()));
                 frame.render_widget(para, chunks[1]);
@@ -1568,7 +1572,7 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
                             .title("Username"),
                     )
                     .style(user_style);
@@ -1586,7 +1590,7 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
                             .title("Password"),
                     )
                     .style(pass_style);
@@ -1631,7 +1635,7 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
                             .title("Bearer Token"),
                     )
                     .style(token_style);
@@ -1681,7 +1685,7 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
                             .title("Key Name"),
                     )
                     .style(key_style);
@@ -1699,7 +1703,7 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()))
+                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
                             .title("Key Value"),
                     )
                     .style(value_style);
@@ -1785,7 +1789,7 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()))
+                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()))
                 .title("Query Parameters (a=add, d=delete, ←→ to switch field)"),
         )
         .row_highlight_style(
@@ -1810,13 +1814,14 @@ impl RequestPane {
         let items: Vec<ListItem> = methods.iter().map(|m| ListItem::new(m.as_str())).collect();
 
         let list = List::new(items)
+            .style(Style::default().fg(theme.foreground.as_color()))
             .block(
                 Block::default()
                     .title("Select Method")
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(theme.border.active_color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color())),
+                    .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
             )
             .highlight_style(
                 Style::default()
@@ -1864,11 +1869,13 @@ impl RequestPane {
             })
             .collect();
 
-        let list = List::new(items).block(
+        let list = List::new(items)
+            .style(Style::default().fg(theme.foreground.as_color()))
+            .block(
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.active_color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color())),
+                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
         );
 
         frame.render_widget(list, popup_area);
@@ -2452,7 +2459,10 @@ mod tests {
         let request = pane.to_request(15).unwrap();
 
         assert_eq!(request.url.as_str(), "https://example.com/api?page=1");
-        assert_eq!(request.headers.get("Authorization"), Some("Bearer token123"));
+        assert_eq!(
+            request.headers.get("Authorization"),
+            Some("Bearer token123")
+        );
         assert_eq!(request.timeout_secs, 15);
     }
 
@@ -2513,9 +2523,9 @@ mod tests {
     fn test_ctrl_f_opens_search() {
         let mut pane = RequestPane::new();
         pane.focused_field = FocusedField::TabContent;
-        
+
         let result = pane.handle_key(KeyCode::Char('f'), KeyModifiers::CONTROL);
-        
+
         assert!(pane.search_visible);
         assert!(result);
     }

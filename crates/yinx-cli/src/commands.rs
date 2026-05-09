@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::process;
-use yinx_core::request::{Method, RequestBuilder, RequestBody};
+use yinx_core::request::{Method, RequestBody, RequestBuilder};
 use yinx_http::client::HttpClient;
 
 #[derive(Parser, Debug)]
@@ -128,7 +128,18 @@ pub async fn run() {
             header,
             timeout,
         } => {
-            run_request_or_workflow(&target, &method, data, json_data, header, timeout, cli.json, cli.quiet, cli.verbose).await
+            run_request_or_workflow(
+                &target,
+                &method,
+                data,
+                json_data,
+                header,
+                timeout,
+                cli.json,
+                cli.quiet,
+                cli.verbose,
+            )
+            .await
         }
         Commands::Exec {
             target,
@@ -138,10 +149,25 @@ pub async fn run() {
             header,
             timeout,
         } => {
-            run_request_or_workflow(&target, &method, data, json_data, header, timeout, cli.json, cli.quiet, cli.verbose).await
+            run_request_or_workflow(
+                &target,
+                &method,
+                data,
+                json_data,
+                header,
+                timeout,
+                cli.json,
+                cli.quiet,
+                cli.verbose,
+            )
+            .await
         }
         Commands::Import { file, output } => import_file(&file, output).await,
-        Commands::Stream { url, method, header } => stream_response(&url, &method, header).await,
+        Commands::Stream {
+            url,
+            method,
+            header,
+        } => stream_response(&url, &method, header).await,
     };
 
     match result {
@@ -172,13 +198,25 @@ async fn run_request_or_workflow(
     quiet: bool,
     verbose: bool,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    let is_workflow = (target.ends_with(".yaml") || target.ends_with(".yml") || target.ends_with(".json"))
-        && std::path::Path::new(target).exists();
+    let is_workflow =
+        (target.ends_with(".yaml") || target.ends_with(".yml") || target.ends_with(".json"))
+            && std::path::Path::new(target).exists();
 
     if is_workflow {
         run_workflow(target, json_output, quiet, verbose).await
     } else {
-        run_single_request(target, method, data, json_data, headers, timeout, json_output, quiet, verbose).await
+        run_single_request(
+            target,
+            method,
+            data,
+            json_data,
+            headers,
+            timeout,
+            json_output,
+            quiet,
+            verbose,
+        )
+        .await
     }
 }
 
@@ -203,7 +241,11 @@ async fn run_single_request(
     for header_str in headers {
         let parts: Vec<&str> = header_str.splitn(2, ':').collect();
         if parts.len() != 2 {
-            return Err(format!("Invalid header format: '{}'. Expected 'Name: Value'", header_str).into());
+            return Err(format!(
+                "Invalid header format: '{}'. Expected 'Name: Value'",
+                header_str
+            )
+            .into());
         }
         builder = builder.header(parts[0].trim(), parts[1].trim());
     }
@@ -236,14 +278,18 @@ async fn run_single_request(
         let body_json = match &response.body {
             yinx_core::response::ResponseBody::Json(v) => v.clone(),
             yinx_core::response::ResponseBody::Text(s) => {
-                serde_json::from_str::<serde_json::Value>(s).unwrap_or_else(|_| serde_json::Value::String(s.clone()))
+                serde_json::from_str::<serde_json::Value>(s)
+                    .unwrap_or_else(|_| serde_json::Value::String(s.clone()))
             }
             _ => serde_json::Value::Null,
         };
 
         let mut headers_map = serde_json::Map::new();
         for (name, value) in response.headers.to_pairs() {
-            headers_map.insert(name.to_string(), serde_json::Value::String(value.to_string()));
+            headers_map.insert(
+                name.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
         }
 
         let output = serde_json::json!({
@@ -343,7 +389,10 @@ async fn run_workflow(
     }
 }
 
-async fn import_file(file: &str, output: Option<String>) -> Result<i32, Box<dyn std::error::Error>> {
+async fn import_file(
+    file: &str,
+    output: Option<String>,
+) -> Result<i32, Box<dyn std::error::Error>> {
     println!("Importing from: {}", file);
     if let Some(output) = output {
         println!("Output to: {}", output);
@@ -352,13 +401,15 @@ async fn import_file(file: &str, output: Option<String>) -> Result<i32, Box<dyn 
     Ok(0)
 }
 
-async fn stream_response(url: &str, method: &str, headers: Vec<String>) -> Result<i32, Box<dyn std::error::Error>> {
+async fn stream_response(
+    url: &str,
+    method: &str,
+    headers: Vec<String>,
+) -> Result<i32, Box<dyn std::error::Error>> {
     println!("Streaming from: {}", url);
 
     let method: Method = method.parse()?;
-    let mut builder = RequestBuilder::new()
-        .method(method)
-        .url(url.to_string());
+    let mut builder = RequestBuilder::new().method(method).url(url.to_string());
 
     for header_str in headers {
         let parts: Vec<&str> = header_str.splitn(2, ':').collect();

@@ -16,7 +16,7 @@ pub struct Config {
 impl Config {
     pub fn default_config() -> Self {
         Self {
-            theme: "dark".to_string(),
+            theme: "terminal".to_string(),
             keybindings: HashMap::new(),
             defaults: AppSettings::default(),
         }
@@ -116,7 +116,12 @@ fn xdg_config_dir() -> Option<PathBuf> {
     env::var("XDG_CONFIG_HOME")
         .ok()
         .map(PathBuf::from)
-        .or_else(|| home_dir().map(|mut p| { p.push(".config"); p }))
+        .or_else(|| {
+            home_dir().map(|mut p| {
+                p.push(".config");
+                p
+            })
+        })
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -142,7 +147,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default_config();
-        assert_eq!(config.theme, "dark");
+        assert_eq!(config.theme, "terminal");
         assert_eq!(config.defaults.default_timeout_secs, 30);
         assert!(config.defaults.follow_redirects);
         assert!(config.defaults.verify_tls);
@@ -155,7 +160,10 @@ mod tests {
         let yaml = serde_yaml::to_string(&config).unwrap();
         let decoded: Config = serde_yaml::from_str(&yaml).unwrap();
         assert_eq!(config.theme, decoded.theme);
-        assert_eq!(config.defaults.default_timeout_secs, decoded.defaults.default_timeout_secs);
+        assert_eq!(
+            config.defaults.default_timeout_secs,
+            decoded.defaults.default_timeout_secs
+        );
     }
 
     #[test]
@@ -173,7 +181,7 @@ mod tests {
         config.save_to_file(&path).unwrap();
 
         let loaded = Config::load_from_file(&path).unwrap();
-        assert_eq!(loaded.theme, "dark");
+        assert_eq!(loaded.theme, "terminal");
         assert_eq!(loaded.defaults.default_timeout_secs, 30);
 
         let _ = fs::remove_file(&path);
@@ -186,7 +194,7 @@ mod tests {
         config.save_to_file(&path).unwrap();
 
         let loaded = Config::load_from_file(&path).unwrap();
-        assert_eq!(loaded.theme, "dark");
+        assert_eq!(loaded.theme, "terminal");
 
         let _ = fs::remove_file(&path);
     }
@@ -266,8 +274,12 @@ mod tests {
     #[test]
     fn test_config_with_keybindings() {
         let mut config = Config::default_config();
-        config.keybindings.insert("quit".to_string(), "Ctrl+c".to_string());
-        config.keybindings.insert("save".to_string(), "Ctrl+s".to_string());
+        config
+            .keybindings
+            .insert("quit".to_string(), "Ctrl+c".to_string());
+        config
+            .keybindings
+            .insert("save".to_string(), "Ctrl+s".to_string());
 
         assert_eq!(config.keybindings.len(), 2);
         assert_eq!(config.keybindings.get("quit").unwrap(), "Ctrl+c");
@@ -277,7 +289,8 @@ mod tests {
     fn test_config_preserves_unknown_env_vars() {
         env::set_var("YINX_UNKNOWN_VAR", "value");
         let config = Config::default_config().apply_env_overrides();
-        assert_eq!(config.theme, "dark");
+        assert!(config.keybindings.is_empty());
+        assert_eq!(config.defaults.default_timeout_secs, 30);
         env::remove_var("YINX_UNKNOWN_VAR");
     }
 

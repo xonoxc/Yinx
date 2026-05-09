@@ -55,8 +55,8 @@ fn test_postman_variable_substitution() {
         ]
     }"#;
 
-    let requests = yinx_import::postman::parse_collection(postman_json)
-        .expect("Import should succeed");
+    let requests =
+        yinx_import::postman::parse_collection(postman_json).expect("Import should succeed");
 
     assert_eq!(requests.len(), 1);
     assert_eq!(
