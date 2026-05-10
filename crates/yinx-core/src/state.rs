@@ -3,7 +3,9 @@ use std::collections::HashMap;
 
 use crate::request::Request;
 use crate::response::Response;
+use crate::tabs::TabManager;
 use crate::timing::Timing;
+use crate::workspace::Workspace;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SavedRequest {
@@ -95,6 +97,8 @@ pub struct AppState {
     pub history: Vec<HistoryEntry>,
     pub workflows: HashMap<String, WorkflowDefinition>,
     pub settings: AppSettings,
+    pub workspace: Workspace,
+    pub tab_manager: TabManager,
 }
 
 impl AppState {

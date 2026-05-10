@@ -64,6 +64,26 @@ pub enum KeyAction {
     CycleTheme,
     OpenCommandPalette,
     Search,
+    NewTab,
+    CloseTab,
+    ToggleSidebar,
+    Yank,
+    Paste,
+    Undo,
+    Redo,
+    InsertAtEnd,
+    InsertLineBelow,
+    InsertLineAbove,
+    SearchNext,
+    SearchPrev,
+    OpenConfirm,
+    ChordPaneLeft,
+    ChordPaneDown,
+    ChordPaneUp,
+    ChordPaneRight,
+    ChordPaneNext,
+    ChordPaneClose,
+    ChordPaneOther,
     Unknown,
 }
 
@@ -101,6 +121,26 @@ impl fmt::Display for KeyAction {
             KeyAction::CycleTheme => "cycle_theme",
             KeyAction::OpenCommandPalette => "open_command_palette",
             KeyAction::Search => "search",
+            KeyAction::NewTab => "new_tab",
+            KeyAction::CloseTab => "close_tab",
+            KeyAction::ToggleSidebar => "toggle_sidebar",
+            KeyAction::Yank => "yank",
+            KeyAction::Paste => "paste",
+            KeyAction::Undo => "undo",
+            KeyAction::Redo => "redo",
+            KeyAction::InsertAtEnd => "insert_at_end",
+            KeyAction::InsertLineBelow => "insert_line_below",
+            KeyAction::InsertLineAbove => "insert_line_above",
+            KeyAction::SearchNext => "search_next",
+            KeyAction::SearchPrev => "search_prev",
+            KeyAction::OpenConfirm => "open_confirm",
+            KeyAction::ChordPaneLeft => "chord_pane_left",
+            KeyAction::ChordPaneDown => "chord_pane_down",
+            KeyAction::ChordPaneUp => "chord_pane_up",
+            KeyAction::ChordPaneRight => "chord_pane_right",
+            KeyAction::ChordPaneNext => "chord_pane_next",
+            KeyAction::ChordPaneClose => "chord_pane_close",
+            KeyAction::ChordPaneOther => "chord_pane_other",
             KeyAction::Unknown => "unknown",
         };
         write!(f, "{}", s)
@@ -256,6 +296,7 @@ impl KeyBindingConfig {
 
         // Mode switching
         bindings.insert(KeyBinding::new("i", &[]), KeyAction::ModeInsert);
+        bindings.insert(KeyBinding::new("a", &[]), KeyAction::InsertAtEnd);
         bindings.insert(KeyBinding::new("v", &[]), KeyAction::ModeVisual);
         bindings.insert(KeyBinding::new("Esc", &[]), KeyAction::ModeNormal);
 
@@ -264,7 +305,6 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("j", &[]), KeyAction::CursorDown);
         bindings.insert(KeyBinding::new("k", &[]), KeyAction::CursorUp);
         bindings.insert(KeyBinding::new("l", &[]), KeyAction::CursorRight);
-        // 'g' is handled specially for 'gg' (go to top)
         bindings.insert(KeyBinding::new("G", &[]), KeyAction::CursorBottom);
         bindings.insert(KeyBinding::new("d", &["Ctrl"]), KeyAction::PageDown);
         bindings.insert(KeyBinding::new("u", &["Ctrl"]), KeyAction::PageUp);
@@ -280,21 +320,56 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::DeleteWord);
 
         // Actions
-        bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
         bindings.insert(KeyBinding::new("r", &["Ctrl"]), KeyAction::SendRequest);
         bindings.insert(KeyBinding::new("Enter", &["Ctrl"]), KeyAction::SendRequest);
-        bindings.insert(KeyBinding::new("c", &["Ctrl"]), KeyAction::Quit);
+        bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
 
-        // Tab switching (Shift+h/l)
-        bindings.insert(KeyBinding::new("h", &["Shift"]), KeyAction::SwitchTabLeft);
-        bindings.insert(KeyBinding::new("l", &["Shift"]), KeyAction::SwitchTabRight);
+        // Vim actions
+        bindings.insert(KeyBinding::new("Space", &[]), KeyAction::SendRequest);
+        bindings.insert(KeyBinding::new("Enter", &[]), KeyAction::OpenConfirm);
+        bindings.insert(KeyBinding::new("n", &[]), KeyAction::SearchNext);
+        bindings.insert(KeyBinding::new("N", &[]), KeyAction::SearchPrev);
+        bindings.insert(KeyBinding::new("u", &[]), KeyAction::Undo);
+        bindings.insert(KeyBinding::new("r", &["Ctrl"]), KeyAction::Redo);
+        bindings.insert(KeyBinding::new("o", &[]), KeyAction::InsertLineBelow);
+        bindings.insert(KeyBinding::new("O", &[]), KeyAction::InsertLineAbove);
+        bindings.insert(KeyBinding::new("p", &[]), KeyAction::Paste);
+
+        // Tab management
+        bindings.insert(KeyBinding::new("t", &[]), KeyAction::NewTab);
+        bindings.insert(KeyBinding::new("q", &["Ctrl"]), KeyAction::CloseTab);
+
+        // Sidebar
+        bindings.insert(KeyBinding::new("b", &["Ctrl"]), KeyAction::ToggleSidebar);
+
+        // Command mode (colon)
+        bindings.insert(KeyBinding::new(":", &[]), KeyAction::ModeCommand);
 
         // Search
         bindings.insert(KeyBinding::new("/", &[]), KeyAction::Search);
 
-        // Theme cycling (Shift+t — never bind single-letter typing keys)
+        // Theme cycling
         bindings.insert(KeyBinding::new("T", &[]), KeyAction::CycleTheme);
         bindings.insert(KeyBinding::new("t", &["Shift"]), KeyAction::CycleTheme);
+
+        // Ctrl+w chord actions
+        bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::ChordPaneNext);
+        bindings.insert(
+            KeyBinding::new("h", &["Ctrl"]),
+            KeyAction::ChordPaneLeft,
+        );
+        bindings.insert(
+            KeyBinding::new("j", &["Ctrl"]),
+            KeyAction::ChordPaneDown,
+        );
+        bindings.insert(
+            KeyBinding::new("k", &["Ctrl"]),
+            KeyAction::ChordPaneUp,
+        );
+        bindings.insert(
+            KeyBinding::new("l", &["Ctrl"]),
+            KeyAction::ChordPaneRight,
+        );
 
         Self { bindings }
     }
@@ -320,7 +395,7 @@ impl KeyBindingConfig {
 pub struct InputHandler {
     pub config: KeyBindingConfig,
     pub mode: InputMode,
-    pub pending_key: Option<char>,
+    pub pending_chord: Vec<KeyCode>,
 }
 
 impl Default for InputHandler {
@@ -334,7 +409,7 @@ impl InputHandler {
         Self {
             config: KeyBindingConfig::default_bindings(),
             mode: InputMode::Normal,
-            pending_key: None,
+            pending_chord: Vec::new(),
         }
     }
 
@@ -342,7 +417,7 @@ impl InputHandler {
         Self {
             config,
             mode: InputMode::Normal,
-            pending_key: None,
+            pending_chord: Vec::new(),
         }
     }
 
@@ -357,8 +432,84 @@ impl InputHandler {
 
     fn handle_normal_mode(&mut self, event: KeyEvent) -> Vec<AppEvent> {
         let mut events = Vec::new();
-        let action = self.config.get_action(&event);
 
+        // Handle chord sequences first
+        if !self.pending_chord.is_empty() {
+            let chord = self.pending_chord.clone();
+            self.pending_chord.clear();
+
+            match chord.as_slice() {
+                // 'g' chord: gg (top), gt (next tab), gT (prev tab)
+                [KeyCode::Char('g')] => {
+                    match event.code {
+                        KeyCode::Char('g') => {
+                            events.push(AppEvent::CursorMoved {
+                                lines: i64::MIN,
+                                cols: 0,
+                            });
+                            return events;
+                        }
+                        KeyCode::Char('t') => {
+                            events.push(AppEvent::TabSwitchRelative(1));
+                            return events;
+                        }
+                        KeyCode::Char('T') => {
+                            events.push(AppEvent::TabSwitchRelative(-1));
+                            return events;
+                        }
+                        _ => {
+                            // Cancel chord: emit 'g', then process this event normally
+                            events.push(AppEvent::KeyPressed("g".to_string()));
+                        }
+                    }
+                }
+                // Ctrl+w chord: pane management
+                [KeyCode::Char('w')] => {
+                    let chord_action = match event.code {
+                        KeyCode::Char('h') | KeyCode::Left => Some(KeyAction::ChordPaneLeft),
+                        KeyCode::Char('j') | KeyCode::Down => Some(KeyAction::ChordPaneDown),
+                        KeyCode::Char('k') | KeyCode::Up => Some(KeyAction::ChordPaneUp),
+                        KeyCode::Char('l') | KeyCode::Right => Some(KeyAction::ChordPaneRight),
+                        KeyCode::Char('w') => Some(KeyAction::ChordPaneNext),
+                        KeyCode::Char('q') => Some(KeyAction::ChordPaneClose),
+                        KeyCode::Char('o') => Some(KeyAction::ChordPaneOther),
+                        KeyCode::Esc => None,
+                        _ => {
+                            // Cancel chord, process this event normally
+                            return self.handle_normal_mode(event);
+                        }
+                    };
+                    match chord_action {
+                        Some(action) => return self.apply_action(action),
+                        None => return events, // Esc: cancel chord
+                    }
+                }
+                _ => {
+                    // Unknown chord, cancel and process this event normally
+                }
+            }
+        }
+
+        // Check for chord-starting keys
+        match event.code {
+            KeyCode::Char('g') if event.modifiers.is_empty() => {
+                self.pending_chord.push(KeyCode::Char('g'));
+                return events;
+            }
+            KeyCode::Char('w') if event.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.pending_chord.push(KeyCode::Char('w'));
+                return events;
+            }
+            _ => {}
+        }
+
+        let action = self.config.get_action(&event);
+        events.extend(self.apply_action(action));
+        events
+    }
+
+    fn apply_action(&mut self, action: KeyAction) -> Vec<AppEvent> {
+        let mut events = Vec::new();
         match action {
             KeyAction::Quit => {
                 events.push(AppEvent::Quit);
@@ -366,6 +517,11 @@ impl InputHandler {
             KeyAction::ModeInsert => {
                 self.mode = InputMode::Insert;
                 events.push(AppEvent::ModeChanged(InputMode::Insert));
+            }
+            KeyAction::InsertAtEnd => {
+                self.mode = InputMode::Insert;
+                events.push(AppEvent::ModeChanged(InputMode::Insert));
+                events.push(AppEvent::CursorMoved { lines: 0, cols: i64::MAX });
             }
             KeyAction::ModeNormal => {}
             KeyAction::ModeCommand => {
@@ -435,10 +591,10 @@ impl InputHandler {
                 events.push(AppEvent::CyclePanePrev);
             }
             KeyAction::SwitchTabLeft => {
-                events.push(AppEvent::CursorMoved { lines: 0, cols: -1 });
+                events.push(AppEvent::TabSwitchRelative(-1));
             }
             KeyAction::SwitchTabRight => {
-                events.push(AppEvent::CursorMoved { lines: 0, cols: 1 });
+                events.push(AppEvent::TabSwitchRelative(1));
             }
             KeyAction::OpenCommandPalette => {
                 events.push(AppEvent::OpenCommandPalette);
@@ -455,21 +611,75 @@ impl InputHandler {
             KeyAction::CycleTheme => {
                 events.push(AppEvent::ThemeChanged("next".to_string()));
             }
-            _ => {
-                if let KeyCode::Char('g') = event.code {
-                    if self.pending_key == Some('g') {
-                        events.push(AppEvent::CursorMoved {
-                            lines: i64::MIN,
-                            cols: 0,
-                        });
-                        self.pending_key = None;
-                    } else {
-                        self.pending_key = Some('g');
-                    }
-                }
+            KeyAction::NewTab => {
+                events.push(AppEvent::TabOpened {
+                    id: "new".to_string(),
+                });
             }
+            KeyAction::CloseTab => {
+                events.push(AppEvent::TabClosed {
+                    id: String::new(),
+                });
+            }
+            KeyAction::ToggleSidebar => {
+                // App-level event, handled in TuiShell
+            }
+            KeyAction::Yank => {
+                events.push(AppEvent::SaveState);
+            }
+            KeyAction::Paste => {
+                // App-level event, handled in TuiShell
+            }
+            KeyAction::Undo => {
+                events.push(AppEvent::CursorMoved { lines: 0, cols: -1 });
+            }
+            KeyAction::Redo => {
+                // Ctrl+r is also handled as SendRequest in some contexts
+                events.push(AppEvent::ExecuteRequest);
+            }
+            KeyAction::InsertLineBelow => {
+                self.mode = InputMode::Insert;
+                events.push(AppEvent::ModeChanged(InputMode::Insert));
+            }
+            KeyAction::InsertLineAbove => {
+                self.mode = InputMode::Insert;
+                events.push(AppEvent::ModeChanged(InputMode::Insert));
+            }
+            KeyAction::SearchNext => {
+                events.push(AppEvent::SearchActivated);
+            }
+            KeyAction::SearchPrev => {
+                events.push(AppEvent::SearchActivated);
+            }
+            KeyAction::OpenConfirm => {
+                // App-level event, handled in TuiShell
+            }
+            KeyAction::ChordPaneLeft => {
+                events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Request));
+            }
+            KeyAction::ChordPaneDown => {
+                events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs));
+            }
+            KeyAction::ChordPaneUp => {
+                events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Response));
+            }
+            KeyAction::ChordPaneRight => {
+                events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Response));
+            }
+            KeyAction::ChordPaneNext => {
+                events.push(AppEvent::CyclePaneNext);
+            }
+            KeyAction::ChordPaneClose => {
+                events.push(AppEvent::TabClosed {
+                    id: String::new(),
+                });
+            }
+            KeyAction::ChordPaneOther => {
+                // maximize/minimize pane - app-level
+            }
+            KeyAction::Unknown => {}
+            _ => {}
         }
-
         events
     }
 
@@ -855,7 +1065,7 @@ mod tests {
         let event = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
         assert!(events.is_empty());
-        assert_eq!(handler.pending_key, Some('g'));
+        assert_eq!(handler.pending_chord, vec![KeyCode::Char('g')]);
 
         let event = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
         let events = handler.handle_key(event);
@@ -866,7 +1076,7 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(handler.pending_key, None);
+        assert!(handler.pending_chord.is_empty());
 
         // Test 'G' to go to bottom
         let event = KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE);

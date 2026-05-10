@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::request::Request;
 use crate::response::Response;
+use crate::collections::{Collection, CollectionItem};
+use crate::environments::Environment;
 use crate::state::{ActivePane, AppState, InputMode, NetworkState, UiState};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -34,6 +36,34 @@ pub enum AppEvent {
     HistoryEntryAdded { id: String },
     RequestSaved { id: String },
     RequestDeleted { id: String },
+
+    // Collection events
+    CollectionCreated(Collection),
+    CollectionUpdated { id: String },
+    CollectionDeleted { id: String },
+    CollectionItemAdded { collection_id: String, item: CollectionItem },
+    CollectionItemRemoved { collection_id: String, index: usize },
+    CollectionItemMoved { collection_id: String, from: usize, to: usize },
+
+    // Environment events
+    EnvironmentCreated(Environment),
+    EnvironmentUpdated { id: String },
+    EnvironmentDeleted { id: String },
+    EnvironmentActivated { id: Option<String> },
+    EnvironmentVariableAdded { env_id: String },
+    EnvironmentVariableRemoved { env_id: String, key: String },
+
+    // Tab events
+    TabOpened { id: String },
+    TabClosed { id: String },
+    TabSwitched { from: String, to: String },
+    TabSwitchRelative(i64),
+    TabDirtyChanged { id: String, dirty: bool },
+
+    // Workspace events
+    WorkspaceOpened { id: String },
+    WorkspaceSaved,
+    WorkspaceSettingsChanged,
 
     // Workflow events
     WorkflowStarted { id: String },
@@ -256,6 +286,71 @@ impl StateReducer {
                 diff.ui_state_changed = true;
             }
             AppEvent::ConfigChanged { .. } => {
+                diff.app_state_changed = true;
+            }
+
+            // Collection events
+            AppEvent::CollectionCreated(_) => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::CollectionUpdated { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::CollectionDeleted { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::CollectionItemAdded { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::CollectionItemRemoved { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::CollectionItemMoved { .. } => {
+                diff.app_state_changed = true;
+            }
+
+            // Environment events
+            AppEvent::EnvironmentCreated(_) => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::EnvironmentUpdated { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::EnvironmentDeleted { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::EnvironmentActivated { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::EnvironmentVariableAdded { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::EnvironmentVariableRemoved { .. } => {
+                diff.app_state_changed = true;
+            }
+
+            // Tab events
+            AppEvent::TabOpened { .. } => {
+                diff.ui_state_changed = true;
+                diff.app_state_changed = true;
+            }
+            AppEvent::TabClosed { .. } => {
+                diff.ui_state_changed = true;
+                diff.app_state_changed = true;
+            }
+            AppEvent::TabSwitched { .. } | AppEvent::TabSwitchRelative(_) => {
+                diff.ui_state_changed = true;
+            }
+            AppEvent::TabDirtyChanged { .. } => {
+                diff.app_state_changed = true;
+            }
+
+            // Workspace events
+            AppEvent::WorkspaceOpened { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::WorkspaceSaved => {}
+            AppEvent::WorkspaceSettingsChanged => {
                 diff.app_state_changed = true;
             }
         }

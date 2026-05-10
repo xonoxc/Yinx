@@ -1,4 +1,5 @@
 pub mod app;
+pub mod command_palette;
 pub mod editor;
 pub mod input;
 pub mod layout;
@@ -9,6 +10,7 @@ pub mod theme;
 pub mod widgets;
 
 pub use app::{run_tui, with_error_boundary, App, AppError, EventLoop, TerminalGuard};
+pub use command_palette::{CommandPalette, PaletteAction};
 pub use editor::{
     create_temp_edit_file, detect_editor, edit_with_runner, EditorError, EditorFormat,
     EditorRunResult, EditorRunner, NoopTerminalSession, SystemEditorRunner, TerminalSession,

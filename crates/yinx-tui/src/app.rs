@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Terminal as RatatuiTerminal;
 
+use crate::command_palette::{CommandPalette, PaletteAction};
 use crate::editor::{self, EditorError, EditorFormat, SystemEditorRunner, TerminalSession};
 use crate::layout::Layout;
 use crate::logs_pane::{LogLevel, LogsPane};
@@ -150,6 +151,7 @@ struct TuiShell {
     should_quit: bool,
     show_help: bool,
     input_handler: InputHandler,
+    command_palette: CommandPalette,
 }
 
 impl TuiShell {
@@ -195,6 +197,7 @@ impl TuiShell {
             should_quit: false,
             show_help: false,
             input_handler: InputHandler::new(),
+            command_palette: CommandPalette::new(),
         }
     }
 
@@ -268,6 +271,56 @@ impl TuiShell {
             return Ok(());
         }
 
+        // Handle command palette if open
+        if self.command_palette.is_visible() {
+            let action = self.command_palette.handle_key(key_event);
+            match action {
+                PaletteAction::Execute(events) => {
+                    self.command_palette.hide();
+                    self.input_handler.switch_mode(InputMode::Normal);
+                    for evt in events {
+                        match evt {
+                            AppEvent::Quit => {
+                                self.should_quit = true;
+                            }
+                            AppEvent::ExecuteRequest => {
+                                if let Err(e) = self.execute_request().await {
+                                    self.logs_pane.add_log(
+                                        LogLevel::Error,
+                                        e.to_string(),
+                                    );
+                                    self.latest_error = Some(e.to_string());
+                                }
+                            }
+                            AppEvent::SaveState => {
+                                self.logs_pane
+                                    .add_log(LogLevel::Info, "State saved");
+                            }
+                            AppEvent::SearchActivated => {
+                                // handled by pane
+                            }
+                            AppEvent::SettingsOpened => {
+                                self.show_help = true;
+                            }
+                            AppEvent::ImportStarted { .. } => {
+                                self.logs_pane.add_log(
+                                    LogLevel::Info,
+                                    "Import triggered",
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                PaletteAction::Close => {
+                    self.command_palette.hide();
+                    self.input_handler.switch_mode(InputMode::Normal);
+                }
+                PaletteAction::None => {}
+            }
+            return Ok(());
+        }
+
         // Handle settings pane if open
         if self.settings_pane.is_open() {
             match key_event.code {
@@ -336,6 +389,15 @@ impl TuiShell {
             }
         }
 
+        // Handle command mode (:) entry
+        if self.input_handler.current_mode() == InputMode::Normal {
+            if key_event.code == KeyCode::Char(':') && key_event.modifiers.is_empty() {
+                self.command_palette.show();
+                self.input_handler.switch_mode(InputMode::Command);
+                return Ok(());
+            }
+        }
+
         // Use InputHandler for terminal-native keybindings
         let events = self.input_handler.handle_key(key_event);
 
@@ -350,7 +412,10 @@ impl TuiShell {
                     self.active_pane = pane;
                     handled = true;
                 }
-                AppEvent::ModeChanged(_) => {
+                AppEvent::ModeChanged(mode) => {
+                    if mode == InputMode::Command {
+                        self.command_palette.show();
+                    }
                     handled = true;
                 }
                 AppEvent::CyclePaneNext => {
@@ -386,6 +451,7 @@ impl TuiShell {
                     handled = true;
                 }
                 AppEvent::OpenCommandPalette => {
+                    self.command_palette.show();
                     handled = true;
                 }
                 AppEvent::SearchActivated => {
@@ -400,6 +466,28 @@ impl TuiShell {
                         self.apply_theme_name(&name);
                     }
                     handled = true;
+                }
+                AppEvent::TabSwitchRelative(delta) => {
+                    self.logs_pane.add_log(
+                        LogLevel::Info,
+                        format!("Tab switch relative: {}", delta),
+                    );
+                    handled = true;
+                }
+                AppEvent::TabOpened { .. } => {
+                    self.logs_pane.add_log(LogLevel::Info, "New tab opened");
+                    handled = true;
+                }
+                AppEvent::TabClosed { .. } => {
+                    self.logs_pane.add_log(LogLevel::Info, "Tab closed");
+                    handled = true;
+                }
+                AppEvent::KeyPressed(_)
+                | AppEvent::CursorMoved { .. }
+                | AppEvent::Scrolled(_)
+                | AppEvent::SaveState
+                | AppEvent::NetworkStateChange(_) => {
+                    handled = false;
                 }
                 _ => {}
             }
@@ -664,6 +752,10 @@ impl TuiShell {
 
         if self.show_help {
             self.render_help(frame, area);
+        }
+
+        if self.command_palette.is_visible() {
+            self.command_palette.render(frame, area, &self.theme);
         }
     }
 

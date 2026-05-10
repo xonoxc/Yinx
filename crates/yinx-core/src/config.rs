@@ -287,6 +287,12 @@ mod tests {
 
     #[test]
     fn test_config_preserves_unknown_env_vars() {
+        // Clear known env vars that other tests may have set
+        env::remove_var("YINX_DEFAULT_TIMEOUT_SECS");
+        env::remove_var("YINX_THEME");
+        env::remove_var("YINX_FOLLOW_REDIRECTS");
+        env::remove_var("YINX_VERIFY_TLS");
+        env::remove_var("YINX_MAX_HISTORY_ENTRIES");
         env::set_var("YINX_UNKNOWN_VAR", "value");
         let config = Config::default_config().apply_env_overrides();
         assert!(config.keybindings.is_empty());

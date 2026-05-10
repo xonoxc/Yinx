@@ -1,7 +1,13 @@
+pub mod collections;
+pub mod commands;
 pub mod config;
+pub mod environments;
 pub mod events;
 pub mod metrics;
+pub mod reducers;
 pub mod request;
 pub mod response;
 pub mod state;
+pub mod tabs;
 pub mod timing;
+pub mod workspace;
