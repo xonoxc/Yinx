@@ -163,7 +163,7 @@ struct TuiShell {
     input_handler: InputHandler,
     command_palette: CommandPalette,
     request_controller: RequestController,
-    request_rx: Option<tokio::sync::oneshot::Receiver<RequestEvent>>,
+    request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<RequestEvent>>,
 }
 
 impl TuiShell {
@@ -669,46 +669,56 @@ impl TuiShell {
 
     fn check_request_completion(&mut self) {
         if let Some(rx) = &mut self.request_rx {
-            match rx.try_recv() {
-                Ok(event) => {
-                    match event {
-                        RequestEvent::Completed(response, elapsed_ms) => {
-                            let metrics = RequestMetrics::new()
-                                .with_timing(Timing::new().with_total(elapsed_ms))
-                                .with_status_code(response.status.code())
-                                .with_body_size(response.body_size());
-                            self.logs_pane.set_metrics(metrics);
-
-                            if response.is_error() {
-                                self.logs_pane.add_log(
-                                    LogLevel::Warning,
-                                    format!("Request completed with {}", response.status),
-                                );
-                            } else {
-                                self.logs_pane.add_log(
-                                    LogLevel::Info,
-                                    format!(
-                                        "Request completed with {} in {}ms",
-                                        response.status, elapsed_ms
-                                    ),
-                                );
+            loop {
+                match rx.try_recv() {
+                    Ok(event) => {
+                        match event {
+                            RequestEvent::Chunk(data, _offset) => {
+                                self.response_pane.stream_chunk(data);
+                                self.network_state = NetworkState::Streaming;
                             }
+                            RequestEvent::Completed(response, elapsed_ms) => {
+                                let metrics = RequestMetrics::new()
+                                    .with_timing(Timing::new().with_total(elapsed_ms))
+                                    .with_status_code(response.status.code())
+                                    .with_body_size(response.body_size());
+                                self.logs_pane.set_metrics(metrics);
 
-                            self.response_pane.set_response(response);
-                            self.network_state = NetworkState::Idle;
-                            self.active_pane = ActivePane::Response;
-                        }
-                        RequestEvent::Failed(message) => {
-                            self.logs_pane.add_log(LogLevel::Error, message.clone());
-                            self.response_pane.set_error(message.clone());
-                            self.network_state = NetworkState::Error(message);
+                                if response.is_error() {
+                                    self.logs_pane.add_log(
+                                        LogLevel::Warning,
+                                        format!("Request completed with {}", response.status),
+                                    );
+                                } else {
+                                    self.logs_pane.add_log(
+                                        LogLevel::Info,
+                                        format!(
+                                            "Request completed with {} in {}ms",
+                                            response.status, elapsed_ms
+                                        ),
+                                    );
+                                }
+
+                                self.response_pane.set_response(response);
+                                self.network_state = NetworkState::Idle;
+                                self.active_pane = ActivePane::Response;
+                                self.request_rx = None;
+                                return;
+                            }
+                            RequestEvent::Failed(message) => {
+                                self.logs_pane.add_log(LogLevel::Error, message.clone());
+                                self.response_pane.set_error(message.clone());
+                                self.network_state = NetworkState::Error(message);
+                                self.request_rx = None;
+                                return;
+                            }
                         }
                     }
-                    self.request_rx = None;
-                }
-                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
-                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
-                    self.request_rx = None;
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => break,
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        self.request_rx = None;
+                        return;
+                    }
                 }
             }
         }

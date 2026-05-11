@@ -1,13 +1,13 @@
 use crossterm::event::KeyCode;
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
 use std::collections::HashSet;
-use yinx_core::response::{Response, ResponseBody};
+use yinx_core::response::{Response, ResponseBody, StatusCategory};
 
 use crate::theme::Theme;
 
@@ -16,6 +16,7 @@ pub enum ResponseViewMode {
     Pretty,
     Raw,
     Headers,
+    Preview,
 }
 
 impl ResponseViewMode {
@@ -23,7 +24,8 @@ impl ResponseViewMode {
         match self {
             Self::Pretty => Self::Raw,
             Self::Raw => Self::Headers,
-            Self::Headers => Self::Pretty,
+            Self::Headers => Self::Preview,
+            Self::Preview => Self::Pretty,
         }
     }
 
@@ -32,9 +34,12 @@ impl ResponseViewMode {
             Self::Pretty => "Pretty",
             Self::Raw => "Raw",
             Self::Headers => "Headers",
+            Self::Preview => "Preview",
         }
     }
 }
+
+use crate::virtual_scroll::VirtualScroll;
 
 pub struct ResponsePane {
     response: Option<Response>,
@@ -48,6 +53,11 @@ pub struct ResponsePane {
     view_mode: ResponseViewMode,
     lines_cache: Vec<String>,
     max_visible_lines: usize,
+    follow_stream: bool,
+    stream_bytes: Vec<u8>,
+    truncation_warned: bool,
+    collapsed_large_arrays: bool,
+    virtual_scroll: VirtualScroll<String>,
 }
 
 impl ResponsePane {
@@ -64,6 +74,11 @@ impl ResponsePane {
             view_mode: ResponseViewMode::Pretty,
             lines_cache: Vec::new(),
             max_visible_lines: 1000,
+            follow_stream: false,
+            stream_bytes: Vec::new(),
+            truncation_warned: false,
+            collapsed_large_arrays: false,
+            virtual_scroll: VirtualScroll::new(Vec::new()),
         }
     }
 
@@ -76,7 +91,12 @@ impl ResponsePane {
         self.search_matches.clear();
         self.search_match_set.clear();
         self.search_selected = 0;
+        self.follow_stream = false;
+        self.stream_bytes.clear();
+        self.truncation_warned = false;
+        self.collapsed_large_arrays = false;
         self.rebuild_lines_cache();
+        self.sync_virtual_scroll();
     }
 
     pub fn set_error(&mut self, error: String) {
@@ -85,6 +105,8 @@ impl ResponsePane {
         self.lines_cache.clear();
         self.search_matches.clear();
         self.search_match_set.clear();
+        self.stream_bytes.clear();
+        self.virtual_scroll = VirtualScroll::new(Vec::new());
     }
 
     pub fn response(&self) -> Option<&Response> {
@@ -127,6 +149,31 @@ impl ResponsePane {
         self.lines_cache.len()
     }
 
+    pub fn follow_stream(&self) -> bool {
+        self.follow_stream
+    }
+
+    pub fn set_follow_stream(&mut self, follow: bool) {
+        self.follow_stream = follow;
+    }
+
+    pub fn stream_chunk(&mut self, chunk: Vec<u8>) {
+        self.stream_bytes.extend_from_slice(&chunk);
+        let text = String::from_utf8_lossy(&self.stream_bytes);
+        self.lines_cache = text.lines().map(|l| l.to_string()).collect();
+        self.lines_cache.truncate(self.max_visible_lines * 10);
+        if self.follow_stream {
+            self.scroll_offset = self.lines_cache.len().saturating_sub(self.max_visible_lines);
+        }
+        self.sync_virtual_scroll();
+    }
+
+    fn sync_virtual_scroll(&mut self) {
+        self.virtual_scroll = VirtualScroll::new(self.lines_cache.clone());
+        self.virtual_scroll
+            .set_scroll_offset(self.scroll_offset);
+    }
+
     fn rebuild_lines_cache(&mut self) {
         self.lines_cache.clear();
         let Some(response) = &self.response else {
@@ -138,8 +185,9 @@ impl ResponsePane {
 
         match self.view_mode {
             ResponseViewMode::Pretty => match &response.body {
-                ResponseBody::Json(_) => {
-                    let pretty = response.body.pretty_json().unwrap_or_default();
+                ResponseBody::Json(v) => {
+                    let collapsed = self.collapse_large_arrays(v.clone());
+                    let pretty = serde_json::to_string_pretty(&collapsed).unwrap_or_default();
                     for line in pretty.lines() {
                         self.lines_cache.push(line.to_string());
                     }
@@ -182,9 +230,61 @@ impl ResponsePane {
                     self.lines_cache.push("(no headers)".to_string());
                 }
             }
+            ResponseViewMode::Preview => {
+                let text = match &response.body {
+                    ResponseBody::Json(v) => serde_json::to_string_pretty(v).unwrap_or_default(),
+                    ResponseBody::Text(t) => t.clone(),
+                    ResponseBody::Binary(b) => format!("<binary {} bytes>", b.len()),
+                    ResponseBody::Stream(b) => format!("<stream {} bytes>", b.len()),
+                    ResponseBody::None => String::new(),
+                };
+                for line in text.lines() {
+                    self.lines_cache.push(line.to_string());
+                }
+                if self.lines_cache.is_empty() {
+                    self.lines_cache.push("(empty body)".to_string());
+                }
+            }
         }
 
-        self.lines_cache.truncate(self.max_visible_lines * 10);
+        if self.lines_cache.len() > self.max_visible_lines * 10
+            && !self.truncation_warned
+        {
+            self.lines_cache.truncate(self.max_visible_lines * 10);
+            let warn = format!(
+                "[Response truncated: showing first {} lines]",
+                self.max_visible_lines * 10
+            );
+            self.lines_cache.push(warn);
+            self.truncation_warned = true;
+        }
+    }
+
+    fn collapse_large_arrays(&self, value: serde_json::Value) -> serde_json::Value {
+        match value {
+            serde_json::Value::Array(items) if items.len() > 50 => {
+                let mut collapsed = Vec::with_capacity(52);
+                for item in items.iter().take(50).cloned() {
+                    collapsed.push(self.collapse_large_arrays(item));
+                }
+                collapsed.push(serde_json::Value::String(format!(
+                    "[+ {} more items]",
+                    items.len() - 50
+                )));
+                serde_json::Value::Array(collapsed)
+            }
+            serde_json::Value::Array(items) => {
+                serde_json::Value::Array(items.into_iter().map(|i| self.collapse_large_arrays(i)).collect())
+            }
+            serde_json::Value::Object(map) => {
+                serde_json::Value::Object(
+                    map.into_iter()
+                        .map(|(k, v)| (k, self.collapse_large_arrays(v)))
+                        .collect(),
+                )
+            }
+            other => other,
+        }
     }
 
     fn update_search_matches(&mut self) {
@@ -290,6 +390,19 @@ impl ResponsePane {
                 }
                 true
             }
+            KeyCode::Char('d') => {
+                let half = self.max_visible_lines.saturating_div(2).max(1);
+                self.scroll_offset = self
+                    .scroll_offset
+                    .saturating_add(half)
+                    .min(self.lines_cache.len().saturating_sub(1));
+                true
+            }
+            KeyCode::Char('u') => {
+                let half = self.max_visible_lines.saturating_div(2).max(1);
+                self.scroll_offset = self.scroll_offset.saturating_sub(half);
+                true
+            }
             _ => false,
         }
     }
@@ -298,6 +411,7 @@ impl ResponsePane {
         match key_code {
             KeyCode::Esc => {
                 self.search_visible = false;
+                self.search_term.clear();
                 true
             }
             KeyCode::Enter => {
@@ -310,10 +424,12 @@ impl ResponsePane {
             }
             KeyCode::Backspace => {
                 self.search_term.pop();
+                self.update_search_matches();
                 true
             }
             KeyCode::Char(c) => {
                 self.search_term.push(c);
+                self.update_search_matches();
                 true
             }
             _ => true,
@@ -358,6 +474,9 @@ impl ResponsePane {
         let viewport = inner_height.saturating_sub(1);
         self.max_visible_lines = viewport.max(1);
         let scroll = self.scroll_offset.min(total_lines.saturating_sub(viewport));
+
+        self.virtual_scroll.set_viewport_height(viewport);
+        self.virtual_scroll.set_scroll_offset(scroll);
 
         let visible_lines: Vec<Line> = self
             .lines_cache
@@ -408,22 +527,89 @@ impl ResponsePane {
         if self.search_visible {
             self.render_search_overlay(frame, inner, theme);
         }
+
+        if self.follow_stream {
+            let follow_area = ratatui::layout::Rect::new(
+                inner.x + inner.width.saturating_sub(12),
+                inner.y,
+                12,
+                1,
+            );
+            let follow_text = Paragraph::new(Line::from(Span::styled(
+                " [FOLLOWING] ",
+                Style::default()
+                    .bg(theme.semantic.success.as_color())
+                    .fg(Color::Black),
+            )));
+            frame.render_widget(follow_text, follow_area);
+        }
+
+        if self.truncation_warned && self.view_mode == ResponseViewMode::Pretty {
+            let warn_area = ratatui::layout::Rect::new(
+                inner.x,
+                inner.y + inner.height.saturating_sub(1),
+                inner.width.min(40),
+                1,
+            );
+            let warn_text = Paragraph::new(Line::from(Span::styled(
+                " [Response truncated, press 't' for Raw view] ",
+                Style::default().fg(theme.semantic.warning.as_color()),
+            )));
+            frame.render_widget(warn_text, warn_area);
+        }
     }
 
-    fn build_title(&self, _theme: &Theme) -> String {
+    fn build_title(&self, theme: &Theme) -> Line<'static> {
+        let mut spans = Vec::new();
+        spans.push(Span::styled(
+            " RESPONSE ",
+            Style::default().add_modifier(Modifier::BOLD),
+        ));
+
         if let Some(response) = &self.response {
-            format!(
-                "RESPONSE  {}  {}ms  {}b  {}",
-                response.status,
-                response.timing_ms,
+            let status_color = match response.status.category() {
+                StatusCategory::Success => theme.semantic.success.as_color(),
+                StatusCategory::Redirection => theme.semantic.warning.as_color(),
+                StatusCategory::ClientError => Color::Indexed(208),
+                StatusCategory::ServerError => theme.semantic.error.as_color(),
+                _ => theme.foreground.as_color(),
+            };
+            let status_str = format!("  {} ", response.status);
+            spans.push(Span::styled(
+                status_str,
+                Style::default()
+                    .fg(status_color)
+                    .add_modifier(Modifier::BOLD),
+            ));
+
+            let timing_color = if response.timing_ms < 100 {
+                theme.semantic.success.as_color()
+            } else if response.timing_ms < 500 {
+                theme.semantic.warning.as_color()
+            } else {
+                theme.semantic.error.as_color()
+            };
+            let timing_str = format!("  {}ms ", response.timing_ms);
+            spans.push(Span::styled(
+                timing_str,
+                Style::default().fg(timing_color),
+            ));
+
+            spans.push(Span::raw(format!(
+                "  {}  {}",
                 human_size(response.body_size()),
                 response.content_type().unwrap_or("unknown"),
-            )
+            )));
         } else if self.error.is_some() {
-            "RESPONSE  ERROR".to_string()
-        } else {
-            "RESPONSE".to_string()
+            spans.push(Span::styled(
+                "  ERROR ",
+                Style::default()
+                    .fg(theme.semantic.error.as_color())
+                    .add_modifier(Modifier::BOLD),
+            ));
         }
+
+        Line::from(spans)
     }
 
     fn render_scrollbar(
@@ -659,7 +845,16 @@ mod tests {
         let mode = ResponseViewMode::Pretty;
         assert_eq!(mode.next(), ResponseViewMode::Raw);
         assert_eq!(mode.next().next(), ResponseViewMode::Headers);
-        assert_eq!(mode.next().next().next(), ResponseViewMode::Pretty);
+        assert_eq!(mode.next().next().next(), ResponseViewMode::Preview);
+        assert_eq!(mode.next().next().next().next(), ResponseViewMode::Pretty);
+    }
+
+    #[test]
+    fn test_view_mode_as_str() {
+        assert_eq!(ResponseViewMode::Pretty.as_str(), "Pretty");
+        assert_eq!(ResponseViewMode::Raw.as_str(), "Raw");
+        assert_eq!(ResponseViewMode::Headers.as_str(), "Headers");
+        assert_eq!(ResponseViewMode::Preview.as_str(), "Preview");
     }
 
     #[test]
@@ -742,5 +937,123 @@ mod tests {
             .build();
         pane.set_response(response);
         assert!(pane.has_content());
+    }
+
+    #[test]
+    fn test_follow_stream_default_false() {
+        let pane = ResponsePane::new();
+        assert!(!pane.follow_stream());
+    }
+
+    #[test]
+    fn test_set_follow_stream() {
+        let mut pane = ResponsePane::new();
+        pane.set_follow_stream(true);
+        assert!(pane.follow_stream());
+        pane.set_follow_stream(false);
+        assert!(!pane.follow_stream());
+    }
+
+    #[test]
+    fn test_stream_chunk_appends() {
+        let mut pane = ResponsePane::new();
+        pane.stream_chunk(b"hello ".to_vec());
+        assert!(pane.total_lines() > 0);
+        let first = pane.total_lines();
+        pane.stream_chunk(b"world".to_vec());
+        assert!(pane.total_lines() >= first);
+    }
+
+    #[test]
+    fn test_follow_stream_scrolls_to_bottom() {
+        let mut pane = ResponsePane::new();
+        pane.set_follow_stream(true);
+        pane.max_visible_lines = 2;
+        for i in 0..10 {
+            pane.stream_chunk(format!("line {}\n", i).into_bytes());
+        }
+        // follow_stream should have scrolled to near the bottom
+        assert!(pane.scroll_offset() > 5);
+    }
+
+    #[test]
+    fn test_scroll_half_page_down() {
+        let mut pane = ResponsePane::new();
+        let response = Response::builder()
+            .status(200)
+            .body(ResponseBody::Text(
+                (0..100).map(|i| format!("line{}\n", i)).collect::<String>(),
+            ))
+            .build();
+        pane.set_response(response);
+        pane.max_visible_lines = 20;
+        // Ctrl+d goes down by half viewport
+        pane.handle_key(KeyCode::Char('d'));
+        assert!(pane.scroll_offset() >= 10);
+    }
+
+    #[test]
+    fn test_scroll_half_page_up() {
+        let mut pane = ResponsePane::new();
+        let response = Response::builder()
+            .status(200)
+            .body(ResponseBody::Text(
+                (0..100).map(|i| format!("line{}\n", i)).collect::<String>(),
+            ))
+            .build();
+        pane.set_response(response);
+        pane.max_visible_lines = 20;
+        pane.scroll_offset = 50;
+        // Ctrl+u goes up by half viewport
+        pane.handle_key(KeyCode::Char('u'));
+        assert!(pane.scroll_offset <= 40);
+    }
+
+    #[test]
+    fn test_collapse_large_arrays() {
+        let pane = ResponsePane::new();
+        let large: Vec<serde_json::Value> = (0..100).map(|i| serde_json::json!(i)).collect();
+        let value = serde_json::Value::Array(large);
+        let collapsed = pane.collapse_large_arrays(value);
+        if let serde_json::Value::Array(items) = collapsed {
+            assert_eq!(items.len(), 51); // 50 items + 1 placeholder
+            assert!(items[50].is_string());
+            assert!(items[50].as_str().unwrap().contains("50 more items"));
+        } else {
+            panic!("Expected array");
+        }
+    }
+
+    #[test]
+    fn test_small_arrays_not_collapsed() {
+        let pane = ResponsePane::new();
+        let small: Vec<serde_json::Value> = (0..10).map(|i| serde_json::json!(i)).collect();
+        let value = serde_json::Value::Array(small);
+        let collapsed = pane.collapse_large_arrays(value);
+        if let serde_json::Value::Array(items) = collapsed {
+            assert_eq!(items.len(), 10);
+        } else {
+            panic!("Expected array");
+        }
+    }
+
+    #[test]
+    fn test_preview_view_mode() {
+        let mut pane = ResponsePane::new();
+        let response = Response::builder()
+            .status(200)
+            .body(ResponseBody::Text("<html><body>Hello</body></html>".to_string()))
+            .build();
+        pane.view_mode = ResponseViewMode::Preview;
+        pane.set_response(response);
+        let has_html = pane.lines_cache.iter().any(|l| l.contains("<html>"));
+        assert!(has_html);
+    }
+
+    #[test]
+    fn test_stream_chunk_empty() {
+        let mut pane = ResponsePane::new();
+        pane.stream_chunk(Vec::new());
+        assert_eq!(pane.total_lines(), 0);
     }
 }

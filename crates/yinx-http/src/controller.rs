@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 use yinx_core::request::Request;
 use yinx_core::response::Response;
 use crate::client::HttpClient;
@@ -8,6 +8,7 @@ use crate::client::HttpClient;
 #[derive(Debug)]
 pub enum RequestEvent {
     Completed(Response, u64),
+    Chunk(Vec<u8>, u64),
     Failed(String),
 }
 
@@ -28,12 +29,12 @@ impl RequestController {
         &mut self,
         request: Request,
         client: HttpClient,
-    ) -> oneshot::Receiver<RequestEvent> {
+    ) -> mpsc::UnboundedReceiver<RequestEvent> {
         self.cancel();
         self.cancel_flag.store(false, Ordering::SeqCst);
 
         let cancel = self.cancel_flag.clone();
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         let started_at = std::time::Instant::now();
 
         let handle = tokio::spawn(async move {
@@ -42,9 +43,9 @@ impl RequestController {
                 return;
             }
 
-            let elapsed_ms = started_at.elapsed().as_millis() as u64;
             match client.send_request(request).await {
                 Ok(mut response) => {
+                    let elapsed_ms = started_at.elapsed().as_millis() as u64;
                     response.timing_ms = elapsed_ms;
                     let _ = tx.send(RequestEvent::Completed(response, elapsed_ms));
                 }
