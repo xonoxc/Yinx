@@ -17,22 +17,22 @@ use ratatui::Terminal as RatatuiTerminal;
 
 use crate::command_palette::{CommandPalette, PaletteAction};
 use crate::editor::{self, EditorError, EditorFormat, SystemEditorRunner, TerminalSession};
-use crate::layout::{WorkspaceLayout, WorkspaceRects};
+use crate::layout::WorkspaceLayout;
 use crate::logs_pane::{LogLevel, LogsPane};
 use crate::request_pane::RequestPane;
 use crate::response_pane::ResponsePane;
 use crate::settings_pane::SettingsPane;
-use crate::sidebar::{Sidebar, SidebarItem, SidebarSection};
+use crate::sidebar::Sidebar;
 use crate::tab_bar::TabBar;
 use crate::theme::{Theme, ThemeRegistry};
 use crate::widgets::StatusBar;
-use yinx_core::collections::{Collection, CollectionItem};
-use yinx_core::environments::Environment;
+// Collections used via sidebar
+// Environment used via sidebar
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 #[cfg(test)]
 use yinx_core::state::UiState;
 use yinx_core::state::{ActivePane, InputMode, NetworkState};
-use yinx_core::tabs::{Tab, TabManager};
+use yinx_core::tabs::TabManager;
 use yinx_core::timing::{RequestMetrics, Timing};
 use yinx_http::client::HttpClient;
 use yinx_http::controller::{RequestController, RequestEvent};

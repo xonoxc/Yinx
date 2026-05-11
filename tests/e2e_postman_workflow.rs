@@ -28,10 +28,10 @@ fn test_postman_import_to_workflow_execution() {
         .expect("Postman import should succeed");
     assert_eq!(requests.len(), 1, "Should import 1 request");
 
-    // Then: Build workflow from requests (need Workflow::from_requests - will fail)
-    let workflow = yinx_workflow::Workflow::from_requests(requests, "Test Workflow");
+    // Then: Build workflow from requests
+    let workflow = yinx_workflow::graph::Workflow::from_requests(requests, "Test Workflow");
     assert_eq!(workflow.nodes.len(), 1);
-    assert!(workflow.validate().is_ok(), "Workflow should be valid");
+    assert!(workflow.validate().is_valid(), "Workflow should be valid");
 }
 
 #[test]

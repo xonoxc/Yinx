@@ -1,15 +1,14 @@
 use crossterm::event::KeyCode;
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
 };
 
 use yinx_core::collections::{Collection, CollectionItem};
 use yinx_core::environments::Environment;
-use yinx_core::state::SavedRequest;
 
 use crate::theme::Theme;
 
@@ -360,13 +359,11 @@ impl Sidebar {
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
-        let inner_height = inner.height as usize;
-
         let rendered_items: Vec<ListItem> = self
             .items
             .iter()
             .enumerate()
-            .map(|(i, item)| match item {
+            .map(|(_i, item)| match item {
                 SidebarItem::SectionHeader { section } => {
                     let name = match section {
                         SidebarSection::Collections => "COLLECTIONS",

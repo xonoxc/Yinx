@@ -11,8 +11,6 @@ use yinx_core::tabs::TabManager;
 use crate::theme::Theme;
 
 pub struct TabBar {
-    max_visible_tabs: usize,
-    scroll_offset: usize,
 }
 
 impl Default for TabBar {
@@ -24,8 +22,6 @@ impl Default for TabBar {
 impl TabBar {
     pub fn new() -> Self {
         Self {
-            max_visible_tabs: 10,
-            scroll_offset: 0,
         }
     }
 

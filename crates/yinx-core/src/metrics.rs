@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn test_metrics_collector_error_rate_zero() {
-        let mut collector = MetricsCollector::new();
+        let collector = MetricsCollector::new();
         assert_eq!(collector.error_rate(), 0.0);
     }
 
