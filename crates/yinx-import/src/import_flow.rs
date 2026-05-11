@@ -68,13 +68,15 @@ pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, Stri
             Ok(preview)
         }
         ImportSource::Postman(json) => {
-            let requests = super::postman::parse_collection(&json).map_err(|e| format!("{}", e))?;
-            let items: Vec<ImportItem> = requests
+            let (collection, _warnings) =
+                super::postman::parse_collection_to_collection(&json)
+                    .map_err(|e| format!("{}", e))?;
+            let items: Vec<ImportItem> = collection
+                .flatten_requests()
                 .into_iter()
-                .enumerate()
-                .map(|(i, req)| ImportItem {
-                    name: format!("Request {}", i),
-                    request: req,
+                .map(|sr| ImportItem {
+                    name: sr.name.clone(),
+                    request: sr.request.clone(),
                     source: "Postman".to_string(),
                 })
                 .collect();

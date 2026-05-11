@@ -216,9 +216,9 @@ impl CommandRegistry {
         registry.register(Command {
             name: "export",
             aliases: &["export-collection"],
-            description: "Export current collection",
+            description: "Export current collection as Postman v2.1",
             category: CommandCategory::Collection,
-            execute: || vec![AppEvent::SaveState],
+            execute: || vec![AppEvent::SettingsOpened],
         });
 
         registry.register(Command {

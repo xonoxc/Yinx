@@ -10,4 +10,5 @@ pub mod response;
 pub mod state;
 pub mod tabs;
 pub mod timing;
+pub mod variables;
 pub mod workspace;

@@ -277,6 +277,48 @@ impl RequestPane {
         self
     }
 
+    pub fn set_request(&mut self, request: yinx_core::request::Request) {
+        self.method = request.method;
+        self.url_buffer = InputBuffer::with_content(request.url.as_str());
+        self.headers.clear();
+        for h in request.headers.iter() {
+            self.headers.push((
+                InputBuffer::with_content(&h.name),
+                InputBuffer::with_content(&h.value),
+            ));
+        }
+        if self.headers.is_empty() {
+            self.headers.push((InputBuffer::new(), InputBuffer::new()));
+        }
+        match &request.body {
+            RequestBody::Raw(s) => {
+                self.body_type = BodyType::Raw;
+                self.body_content = InputBuffer::with_content(s);
+            }
+            RequestBody::Json(v) => {
+                self.body_type = BodyType::Json;
+                self.body_content =
+                    InputBuffer::with_content(&serde_json::to_string_pretty(v).unwrap_or_default());
+            }
+            RequestBody::Form(_) => {
+                self.body_type = BodyType::Form;
+                self.body_content = InputBuffer::new();
+            }
+            RequestBody::Multipart(_) => {
+                self.body_type = BodyType::Form;
+                self.body_content = InputBuffer::new();
+            }
+            RequestBody::Binary(data) => {
+                self.body_type = BodyType::Raw;
+                self.body_content = InputBuffer::with_content(&String::from_utf8_lossy(data));
+            }
+            RequestBody::None => {
+                self.body_type = BodyType::Raw;
+                self.body_content = InputBuffer::new();
+            }
+        }
+    }
+
     pub fn method(&self) -> Method {
         self.method
     }

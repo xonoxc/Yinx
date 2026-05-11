@@ -164,6 +164,10 @@ impl LogsPane {
         self.current_request = Some(request);
     }
 
+    pub fn current_request(&self) -> Option<&Request> {
+        self.current_request.as_ref()
+    }
+
     pub fn clear_current_request(&mut self) {
         self.current_request = None;
     }

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use yinx_core::collections::{Collection, CollectionItem};
+use yinx_core::environments::Environment;
 use yinx_core::request::{Method, Request, RequestBody, RequestUrl};
+use yinx_core::state::SavedRequest;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PostmanCollection {
@@ -286,6 +289,203 @@ pub fn parse_environment(json: &str) -> Result<HashMap<String, String>, String> 
 pub struct ImportResult {
     pub requests: Vec<Request>,
     pub variables: HashMap<String, String>,
+}
+
+pub fn parse_collection_to_collection(json: &str) -> Result<(Collection, Vec<String>), String> {
+    let postman: PostmanCollection = serde_json::from_str(json).map_err(|e| e.to_string())?;
+
+    let collection_name = postman.info.name.clone();
+    let mut collection = Collection::new(collection_name);
+
+    let collection_variables: HashMap<String, String> = postman
+        .variable
+        .iter()
+        .map(|v| (v.key.clone(), v.value.clone()))
+        .collect();
+
+    let mut warnings = Vec::new();
+
+    for item in postman.item {
+        match convert_item_to_collection_item(item, &collection_variables, &mut warnings) {
+            Some(ci) => collection.add_item(ci),
+            None => {}
+        }
+    }
+
+    Ok((collection, warnings))
+}
+
+fn convert_item_to_collection_item(
+    item: PostmanItem,
+    variables: &HashMap<String, String>,
+    warnings: &mut Vec<String>,
+) -> Option<CollectionItem> {
+    match item {
+        PostmanItem::Request {
+            name,
+            request: req,
+            item: sub_items,
+        } => {
+            if let Some(sub_items) = sub_items {
+                if !sub_items.is_empty() {
+                    let mut children = Vec::new();
+                    for sub in sub_items {
+                        if let Some(child) =
+                            convert_item_to_collection_item(sub, variables, warnings)
+                        {
+                            children.push(child);
+                        }
+                    }
+                    return Some(CollectionItem::Folder {
+                        name,
+                        children,
+                    });
+                }
+            }
+
+            match convert_request_to_saved(name, req, variables, warnings) {
+                Some(saved) => Some(CollectionItem::Request(Box::new(saved))),
+                None => None,
+            }
+        }
+        PostmanItem::Folder {
+            name,
+            item: items,
+            ..
+        } => {
+            let children: Vec<CollectionItem> = items
+                .into_iter()
+                .filter_map(|i| convert_item_to_collection_item(i, variables, warnings))
+                .collect();
+            Some(CollectionItem::Folder {
+                name,
+                children,
+            })
+        }
+    }
+}
+
+fn convert_request_to_saved(
+    name: String,
+    req: PostmanRequest,
+    variables: &HashMap<String, String>,
+    warnings: &mut Vec<String>,
+) -> Option<SavedRequest> {
+    let method: Method = match req.method.parse() {
+        Ok(m) => m,
+        Err(_) => {
+            warnings.push(format!("Unknown method '{}' for request '{}'", req.method, name));
+            return None;
+        }
+    };
+
+    let url_str = resolve_url(req.url, variables);
+    let url = match RequestUrl::new(&url_str) {
+        Ok(u) => u,
+        Err(_) => {
+            warnings.push(format!("Invalid URL '{}' for request '{}'", url_str, name));
+            return None;
+        }
+    };
+
+    let mut headers = yinx_core::request::Headers::new();
+    for h in req.header {
+        let key = replace_variables(&h.key, variables);
+        let value = replace_variables(&h.value, variables);
+        let _ = headers.set(&key, &value);
+    }
+
+    let body = if let Some(body) = req.body {
+        convert_body(body, &headers, variables)
+    } else {
+        RequestBody::None
+    };
+
+    let request = Request {
+        method,
+        url,
+        headers,
+        body,
+        timeout_secs: 30,
+    };
+
+    Some(SavedRequest {
+        id: uuid::Uuid::new_v4().to_string(),
+        name,
+        request,
+        tags: Vec::new(),
+    })
+}
+
+fn convert_body(
+    body: PostmanBody,
+    headers: &yinx_core::request::Headers,
+    variables: &HashMap<String, String>,
+) -> RequestBody {
+    match body.mode.as_str() {
+        "raw" => {
+            if let Some(raw) = body.raw {
+                let raw = replace_variables(&raw, variables);
+                if headers.get("content-type") == Some("application/json") {
+                    if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
+                        return RequestBody::Json(json);
+                    }
+                }
+                RequestBody::Raw(raw)
+            } else {
+                RequestBody::None
+            }
+        }
+        "urlencoded" => {
+            if let Some(params) = body.urlencoded {
+                let pairs: Vec<(String, String)> = params
+                    .into_iter()
+                    .map(|p| {
+                        (
+                            replace_variables(&p.key, variables),
+                            replace_variables(&p.value, variables),
+                        )
+                    })
+                    .collect();
+                RequestBody::Form(pairs)
+            } else {
+                RequestBody::None
+            }
+        }
+        "formdata" => {
+            if let Some(params) = body.formdata {
+                let pairs: Vec<(String, String)> = params
+                    .into_iter()
+                    .map(|p| {
+                        (
+                            replace_variables(&p.key, variables),
+                            replace_variables(&p.value, variables),
+                        )
+                    })
+                    .collect();
+                RequestBody::Form(pairs)
+            } else {
+                RequestBody::None
+            }
+        }
+        _ => RequestBody::None,
+    }
+}
+
+pub fn parse_environment_to_env(json: &str) -> Result<Environment, String> {
+    let postman_env: PostmanEnvironment =
+        serde_json::from_str(json).map_err(|e| e.to_string())?;
+
+    let mut env = Environment::new(postman_env.name);
+    for value in postman_env.values {
+        env.add_variable(yinx_core::environments::EnvironmentVariable {
+            key: value.key,
+            value: value.value,
+            enabled: value.enabled,
+        });
+    }
+
+    Ok(env)
 }
 
 #[cfg(test)]

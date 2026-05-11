@@ -1,7 +1,7 @@
 use crossterm::event::KeyCode;
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Frame,
@@ -9,6 +9,8 @@ use ratatui::{
 
 use yinx_core::collections::{Collection, CollectionItem};
 use yinx_core::environments::Environment;
+use yinx_core::request::request_to_curl;
+use yinx_core::state::HistoryEntry;
 
 use crate::theme::Theme;
 
@@ -54,7 +56,7 @@ pub struct Sidebar {
     collections: Vec<Collection>,
     environments: Vec<Environment>,
     active_env: Option<String>,
-    history: Vec<String>,
+    history: Vec<HistoryEntry>,
     filter: String,
     collapsed_sections: Vec<SidebarSection>,
     collapsed_collections: Vec<String>,
@@ -94,9 +96,21 @@ impl Sidebar {
         self.rebuild_items();
     }
 
-    pub fn set_history(&mut self, history: Vec<String>) {
+    pub fn set_history(&mut self, history: Vec<HistoryEntry>) {
         self.history = history;
         self.rebuild_items();
+    }
+
+    pub fn get_history(&self) -> &[HistoryEntry] {
+        &self.history
+    }
+
+    pub fn selected_history_entry(&self) -> Option<&HistoryEntry> {
+        if let Some(SidebarItem::HistoryEntry { id, .. }) = self.items.get(self.selected_index) {
+            self.history.iter().find(|e| &e.id == id)
+        } else {
+            None
+        }
     }
 
     pub fn selected_index(&self) -> usize {
@@ -164,11 +178,11 @@ impl Sidebar {
         if !history_collapsed {
             for entry in &self.history {
                 items.push(SidebarItem::HistoryEntry {
-                    id: String::new(),
-                    method: "GET".to_string(),
-                    url: entry.clone(),
-                    status: None,
-                    time_ago: String::new(),
+                    id: entry.id.clone(),
+                    method: entry.request.method.to_string(),
+                    url: entry.request.url.as_str().to_string(),
+                    status: entry.response.as_ref().map(|r| r.status.code()),
+                    time_ago: relative_time(entry.timestamp),
                 });
             }
         }
@@ -263,6 +277,38 @@ impl Sidebar {
         }
     }
 
+    pub fn get_selected_history_action(&self) -> Option<HistoryAction> {
+        let item = self.items.get(self.selected_index)?;
+        match item {
+            SidebarItem::HistoryEntry { id, .. } => {
+                if id.is_empty() {
+                    return None;
+                }
+                let entry = self.history.iter().find(|e| &e.id == id)?;
+                Some(HistoryAction {
+                    entry_id: id.clone(),
+                    request: entry.request.clone(),
+                    curl: request_to_curl(&entry.request),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn clear_history_items(&mut self) {
+        self.history.clear();
+        self.rebuild_items();
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct HistoryAction {
+    pub entry_id: String,
+    pub request: yinx_core::request::Request,
+    pub curl: String,
+}
+
+impl Sidebar {
     fn handle_filter_key(&mut self, key_code: KeyCode) -> bool {
         match key_code {
             KeyCode::Esc => {
@@ -339,7 +385,20 @@ impl Sidebar {
     }
 
     fn activate_current(&mut self) {
-        // Handled by TuiShell based on selected_item()
+        if let Some(item) = self.items.get(self.selected_index) {
+            if let SidebarItem::Environment { id, .. } = item {
+                if self.active_env.as_deref() == Some(id) {
+                    self.active_env = None;
+                } else {
+                    self.active_env = Some(id.clone());
+                }
+                self.rebuild_items();
+            }
+        }
+    }
+
+    pub fn active_environment_id(&self) -> Option<String> {
+        self.active_env.clone()
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
@@ -414,13 +473,45 @@ impl Sidebar {
                     status,
                     ..
                 } => {
+                    let method_color = match method.as_str() {
+                        "GET" => theme.semantic.success.as_color(),
+                        "POST" => theme.semantic.info.as_color(),
+                        "PUT" | "PATCH" => theme.semantic.warning.as_color(),
+                        "DELETE" => theme.semantic.error.as_color(),
+                        _ => theme.foreground.as_color(),
+                    };
+                    let status_color = status
+                        .map(|s| match s {
+                            200..=299 => theme.semantic.success.as_color(),
+                            300..=399 => theme.semantic.warning.as_color(),
+                            400..=499 => Color::Indexed(208),
+                            500..=599 => theme.semantic.error.as_color(),
+                            _ => theme.foreground.as_color(),
+                        })
+                        .unwrap_or(theme.foreground.as_color());
                     let status_str = status
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "--".to_string());
-                    ListItem::new(Line::from(Span::styled(
-                        format!("  {} {} {} ", method, url, status_str),
-                        Style::default().fg(theme.foreground.as_color()),
-                    )))
+                    ListItem::new(Line::from(vec![
+                        Span::styled(
+                            format!(" {} ", method),
+                            Style::default()
+                                .fg(method_color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            url.clone(),
+                            Style::default().fg(theme.foreground.as_color()),
+                        ),
+                        Span::raw(" "),
+                        Span::styled(
+                            status_str,
+                            Style::default()
+                                .fg(status_color)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]))
                 }
             })
             .collect();
@@ -472,5 +563,25 @@ impl Sidebar {
 impl Default for Sidebar {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn relative_time(timestamp: chrono::DateTime<chrono::Utc>) -> String {
+    let now = chrono::Utc::now();
+    let duration = now - timestamp;
+
+    let secs = duration.num_seconds().unsigned_abs();
+    if secs < 60 {
+        format!("{}s ago", secs)
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else if secs < 604800 {
+        format!("{}d ago", secs / 86400)
+    } else if secs < 2592000 {
+        format!("{}w ago", secs / 604800)
+    } else {
+        format!("{}mo ago", secs / 2592000)
     }
 }

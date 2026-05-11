@@ -26,12 +26,11 @@ use crate::sidebar::Sidebar;
 use crate::tab_bar::TabBar;
 use crate::theme::{Theme, ThemeRegistry};
 use crate::widgets::StatusBar;
-// Collections used via sidebar
-// Environment used via sidebar
+use yinx_core::environments::Environment;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 #[cfg(test)]
 use yinx_core::state::UiState;
-use yinx_core::state::{ActivePane, InputMode, NetworkState};
+use yinx_core::state::{ActivePane, HistoryEntry, InputMode, NetworkState};
 use yinx_core::tabs::TabManager;
 use yinx_core::timing::{RequestMetrics, Timing};
 use yinx_http::client::HttpClient;
@@ -62,6 +61,7 @@ pub async fn run_tui() -> Result<(), AppError> {
         .size()
         .map_err(|e| AppError::Render(e.to_string()))?;
     let mut shell = TuiShell::new(terminal_size.width, terminal_size.height);
+    shell.sync_sidebar_environments();
 
     loop {
         app.terminal()
@@ -164,6 +164,9 @@ struct TuiShell {
     command_palette: CommandPalette,
     request_controller: RequestController,
     request_rx: Option<tokio::sync::mpsc::UnboundedReceiver<RequestEvent>>,
+    history: Vec<HistoryEntry>,
+    environments: Vec<Environment>,
+    active_env_id: Option<String>,
 }
 
 impl TuiShell {
@@ -215,7 +218,15 @@ impl TuiShell {
             command_palette: CommandPalette::new(),
             request_controller: RequestController::new(),
             request_rx: None,
+            history: Vec::new(),
+            environments: Vec::new(),
+            active_env_id: None,
         }
+    }
+
+    fn sync_sidebar_environments(&mut self) {
+        self.sidebar
+            .set_environments(self.environments.clone(), self.active_env_id.clone());
     }
 
     fn apply_theme_name(&mut self, name: &str) {
@@ -627,6 +638,11 @@ impl TuiShell {
         Ok(())
     }
 
+    fn add_history_entry(&mut self, entry: HistoryEntry) {
+        self.history.push(entry);
+        self.sidebar.set_history(self.history.clone());
+    }
+
     fn forward_key_to_active_pane(&mut self, key_event: KeyEvent) {
         let is_normal = self.input_handler.current_mode() == InputMode::Normal;
         let code = if is_normal {
@@ -642,7 +658,47 @@ impl TuiShell {
         };
         match self.active_pane {
             ActivePane::Sidebar => {
-                let _ = self.sidebar.handle_key(code);
+                match key_event.code {
+                    KeyCode::Char('r') => {
+                        if let Some(action) = self.sidebar.get_selected_history_action() {
+                            self.logs_pane.add_log(
+                                LogLevel::Info,
+                                format!("Loaded from history: {} {}", action.request.method, action.request.url.as_str()),
+                            );
+                            self.request_pane.set_request(action.request);
+                            self.active_pane = ActivePane::Request;
+                        }
+                        return;
+                    }
+                    KeyCode::Char('C') => {
+                        if let Some(action) = self.sidebar.get_selected_history_action() {
+                            self.logs_pane.add_log(
+                                LogLevel::Info,
+                                format!("Curl: {}", action.curl),
+                            );
+                        }
+                        return;
+                    }
+                    KeyCode::Char('d') => {
+                        let entry_id = self.sidebar.selected_history_entry().map(|e| e.id.clone());
+                        if let Some(id) = entry_id {
+                            self.history.retain(|e| e.id != id);
+                            self.sidebar.set_history(self.history.clone());
+                            self.logs_pane.add_log(LogLevel::Info, "History entry deleted");
+                        }
+                        return;
+                    }
+                    KeyCode::Char('D') => {
+                        self.history.clear();
+                        self.sidebar.clear_history_items();
+                        self.logs_pane.add_log(LogLevel::Info, "History cleared");
+                        return;
+                    }
+                    _ => {
+                        let _ = self.sidebar.handle_key(code);
+                        self.active_env_id = self.sidebar.active_environment_id();
+                    }
+                }
             }
             ActivePane::Request => {
                 let _ = self.request_pane.handle_key(code, key_event.modifiers);
@@ -697,6 +753,19 @@ impl TuiShell {
                                             response.status, elapsed_ms
                                         ),
                                     );
+                                }
+
+                                // Add to history
+                                if let Some(request) = self.logs_pane.current_request() {
+                                    let entry = HistoryEntry {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        request: request.clone(),
+                                        response: Some(response.clone()),
+                                        timestamp: chrono::Utc::now(),
+                                        timing: Timing::new().with_total(elapsed_ms),
+                                        timeline: None,
+                                    };
+                                    self.add_history_entry(entry);
                                 }
 
                                 self.response_pane.set_response(response);
