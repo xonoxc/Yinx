@@ -91,6 +91,17 @@ pub enum AppEvent {
 
     // Theme events
     ThemeChanged(String),
+
+    // Command & keybinding events
+    ClearLogs,
+    CloseOtherTabs,
+    EqualizePanes,
+    MaximizePaneHeight,
+    MaximizePaneWidth,
+    GoToDefinition,
+    SearchResponse,
+    DeleteLine,
+    InsertAtStart,
 }
 
 pub struct EventBus {
@@ -287,6 +298,17 @@ impl StateReducer {
             }
             AppEvent::ConfigChanged { .. } => {
                 diff.app_state_changed = true;
+            }
+            AppEvent::ClearLogs
+            | AppEvent::CloseOtherTabs
+            | AppEvent::EqualizePanes
+            | AppEvent::MaximizePaneHeight
+            | AppEvent::MaximizePaneWidth
+            | AppEvent::GoToDefinition
+            | AppEvent::SearchResponse
+            | AppEvent::DeleteLine
+            | AppEvent::InsertAtStart => {
+                diff.ui_state_changed = true;
             }
 
             // Collection events

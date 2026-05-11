@@ -1,4 +1,4 @@
-theme: terminal
+theme: light
 keybindings: {}
 defaults:
   theme: dark

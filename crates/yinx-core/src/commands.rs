@@ -166,7 +166,9 @@ impl CommandRegistry {
             aliases: &["tabnew"],
             description: "Create a new request tab",
             category: CommandCategory::Navigation,
-            execute: || vec![],
+            execute: || vec![AppEvent::TabOpened {
+                id: "new".to_string(),
+            }],
         });
 
         registry.register(Command {
@@ -174,7 +176,7 @@ impl CommandRegistry {
             aliases: &["e"],
             description: "Open a request for editing",
             category: CommandCategory::Navigation,
-            execute: || vec![],
+            execute: || vec![AppEvent::SearchActivated],
         });
 
         registry.register(Command {
@@ -182,7 +184,7 @@ impl CommandRegistry {
             aliases: &["col"],
             description: "Open collections sidebar",
             category: CommandCategory::Collection,
-            execute: || vec![],
+            execute: || vec![AppEvent::PaneChanged(crate::state::ActivePane::Sidebar)],
         });
 
         registry.register(Command {
@@ -190,7 +192,7 @@ impl CommandRegistry {
             aliases: &["hist"],
             description: "Show request history",
             category: CommandCategory::Navigation,
-            execute: || vec![],
+            execute: || vec![AppEvent::PaneChanged(crate::state::ActivePane::Logs)],
         });
 
         registry.register(Command {
@@ -198,7 +200,7 @@ impl CommandRegistry {
             aliases: &["env"],
             description: "Switch active environment",
             category: CommandCategory::Environment,
-            execute: || vec![],
+            execute: || vec![AppEvent::SettingsOpened],
         });
 
         registry.register(Command {
@@ -216,7 +218,7 @@ impl CommandRegistry {
             aliases: &["export-collection"],
             description: "Export current collection",
             category: CommandCategory::Collection,
-            execute: || vec![],
+            execute: || vec![AppEvent::SaveState],
         });
 
         registry.register(Command {
@@ -232,7 +234,7 @@ impl CommandRegistry {
             aliases: &[],
             description: "Set configuration option (usage: :set key=value)",
             category: CommandCategory::Settings,
-            execute: || vec![],
+            execute: || vec![AppEvent::SettingsOpened],
         });
 
         registry.register(Command {
@@ -248,7 +250,7 @@ impl CommandRegistry {
             aliases: &["toggle-fullscreen"],
             description: "Toggle fullscreen for current pane",
             category: CommandCategory::Navigation,
-            execute: || vec![],
+            execute: || vec![AppEvent::MaximizePaneHeight],
         });
 
         registry.register(Command {
@@ -256,7 +258,7 @@ impl CommandRegistry {
             aliases: &["toggle-sidebar"],
             description: "Toggle sidebar visibility",
             category: CommandCategory::Navigation,
-            execute: || vec![],
+            execute: || vec![AppEvent::PaneChanged(crate::state::ActivePane::Sidebar)],
         });
 
         registry.register(Command {
@@ -272,7 +274,7 @@ impl CommandRegistry {
             aliases: &["clear-logs"],
             description: "Clear the activity log",
             category: CommandCategory::System,
-            execute: || vec![],
+            execute: || vec![AppEvent::ClearLogs],
         });
 
         registry

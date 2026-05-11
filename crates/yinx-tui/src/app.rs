@@ -311,13 +311,43 @@ impl TuiShell {
                                 self.logs_pane.add_log(LogLevel::Info, "State saved");
                             }
                             AppEvent::SearchActivated => {
-                                // handled by pane
+                                self.logs_pane.add_log(LogLevel::Info, "Search activated");
                             }
                             AppEvent::SettingsOpened => {
-                                self.show_help = true;
+                                self.settings_pane.open();
+                                // Remove this once a proper settings screen exists
+                                self.show_help = !self.show_help;
                             }
                             AppEvent::ImportStarted { .. } => {
                                 self.logs_pane.add_log(LogLevel::Info, "Import triggered");
+                            }
+                            AppEvent::TabOpened { .. } => {
+                                let id = self.tab_manager.open_blank();
+                                self.logs_pane
+                                    .add_log(LogLevel::Info, format!("New tab opened: {}", id));
+                            }
+                            AppEvent::PaneChanged(pane) => {
+                                self.active_pane = pane;
+                            }
+                            AppEvent::ClearLogs => {
+                                self.logs_pane = LogsPane::new();
+                                self.logs_pane.add_log(LogLevel::Info, "Logs cleared");
+                            }
+                            AppEvent::MaximizePaneHeight => {
+                                self.workspace_layout.resize_center_split(0.5);
+                            }
+                            AppEvent::GoToDefinition => {
+                                self.logs_pane.add_log(LogLevel::Info, "Go to definition");
+                            }
+                            AppEvent::SearchResponse => {
+                                self.logs_pane.add_log(LogLevel::Info, "Search in response");
+                            }
+                            AppEvent::CloseOtherTabs => {
+                                if let Some(tab) = self.tab_manager.active_tab() {
+                                    let id = tab.id.clone();
+                                    self.tab_manager.close_others(&id);
+                                    self.logs_pane.add_log(LogLevel::Info, "Closed other tabs");
+                                }
                             }
                             _ => {}
                         }
@@ -509,6 +539,54 @@ impl TuiShell {
                 | AppEvent::SaveState
                 | AppEvent::NetworkStateChange(_) => {
                     handled = false;
+                }
+                AppEvent::CloseOtherTabs => {
+                    if let Some(tab) = self.tab_manager.active_tab() {
+                        let id = tab.id.clone();
+                        self.tab_manager.close_others(&id);
+                        self.logs_pane.add_log(LogLevel::Info, "Closed other tabs");
+                    }
+                    handled = true;
+                }
+                AppEvent::EqualizePanes => {
+                    self.logs_pane.add_log(LogLevel::Info, "Panes equalized");
+                    handled = true;
+                }
+                AppEvent::MaximizePaneHeight => {
+                    self.workspace_layout.resize_center_split(0.5);
+                    handled = true;
+                }
+                AppEvent::MaximizePaneWidth => {
+                    self.workspace_layout.resize_center_split(0.3);
+                    handled = true;
+                }
+                AppEvent::GoToDefinition => {
+                    self.active_pane = ActivePane::Sidebar;
+                    handled = true;
+                }
+                AppEvent::DeleteLine => {
+                    match self.active_pane {
+                        ActivePane::Sidebar => {
+                            self.sidebar.handle_key(KeyCode::Char('d'));
+                        }
+                        ActivePane::Request => {
+                            let _ = self.request_pane.handle_key(KeyCode::Char('d'), KeyModifiers::NONE);
+                        }
+                        _ => {}
+                    }
+                    handled = true;
+                }
+                AppEvent::SearchResponse => {
+                    self.active_pane = ActivePane::Response;
+                    handled = true;
+                }
+                AppEvent::InsertAtStart => {
+                    handled = false;
+                }
+                AppEvent::ClearLogs => {
+                    self.logs_pane = LogsPane::new();
+                    self.logs_pane.add_log(LogLevel::Info, "Logs cleared");
+                    handled = true;
                 }
                 _ => {}
             }
@@ -773,47 +851,67 @@ impl TuiShell {
             )),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Pane Navigation",
+                "Navigation",
                 Style::default().add_modifier(Modifier::BOLD),
             )]),
-            Line::from("  Tab / Shift+Tab    Cycle panes forward/backward"),
-            Line::from("  Ctrl+1/2/3/4       Jump to Request/Response/Workflow/Logs"),
-            Line::from("  Mouse click         Focus pane under cursor"),
+            Line::from("  h/j/k/l             Move cursor / navigate lists"),
+            Line::from("  gg / G              Go to top / bottom"),
+            Line::from("  Ctrl+D / Ctrl+U     Page down / page up"),
+            Line::from("  gt / gT             Next / previous tab"),
+            Line::from("  Ctrl+b              Toggle sidebar"),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Resize Active Pane",
+                "Pane Management",
                 Style::default().add_modifier(Modifier::BOLD),
             )]),
-            Line::from("  + / =               Expand active pane"),
-            Line::from("  - / _               Shrink active pane"),
+            Line::from("  Tab / Shift+Tab     Cycle panes forward/backward"),
+            Line::from("  Ctrl+w h/j/k/l     Navigate panes"),
+            Line::from("  Ctrl+w w            Cycle panes"),
+            Line::from("  Ctrl+w =            Equalize pane sizes"),
+            Line::from("  Ctrl+w _            Maximize pane height"),
+            Line::from("  Ctrl+w |            Maximize pane width"),
+            Line::from("  Ctrl+w q            Close tab"),
+            Line::from("  Ctrl+w o            Close other tabs"),
+            Line::from("  + / -               Resize active pane"),
             Line::from(""),
             Line::from(vec![Span::styled(
-                "Layout",
+                "Mode Switching",
                 Style::default().add_modifier(Modifier::BOLD),
             )]),
-            Line::from("  F7                  Cycle layout preset"),
-            Line::from(""),
-            Line::from(vec![Span::styled(
-                "Editing (Normal mode)",
-                Style::default().add_modifier(Modifier::BOLD),
-            )]),
-            Line::from("  i                   Enter Insert mode"),
+            Line::from("  i / a               Enter Insert mode"),
+            Line::from("  I / A               Insert at start / end"),
             Line::from("  v                   Enter Visual mode"),
+            Line::from("  :                   Enter Command mode"),
             Line::from("  Esc                 Return to Normal mode"),
-            Line::from("  h/j/k/l             Move cursor (Normal/Visual mode)"),
-            Line::from("  Ctrl+D / Ctrl+U     Page down / Page up"),
-            Line::from("  Backspace           Delete character before cursor"),
             Line::from(""),
             Line::from(vec![Span::styled(
                 "Actions",
                 Style::default().add_modifier(Modifier::BOLD),
             )]),
-            Line::from("  Ctrl+R / Ctrl+Enter Send request"),
-            Line::from("  Ctrl+S              Save state"),
-            Line::from("  T / Shift+T         Cycle theme"),
-            Line::from("  /                   Search"),
-            Line::from("  q / Ctrl+C          Quit"),
+            Line::from("  Space / Ctrl+R      Send request"),
+            Line::from("  t                   New tab"),
+            Line::from("  dd                  Delete item (list) / Delete line"),
+            Line::from("  gd                  Go to definition"),
+            Line::from("  T                   Cycle theme"),
+            Line::from("  /                   Search collections"),
+            Line::from("  ?                   Search within response"),
+            Line::from("  n / N               Next / previous search result"),
+            Line::from("  u                   Undo"),
             Line::from(""),
+            Line::from(vec![Span::styled(
+                "Command Palette",
+                Style::default().add_modifier(Modifier::BOLD),
+            )]),
+            Line::from("  :w / :save          Save current request"),
+            Line::from("  :q / :quit          Close tab / quit"),
+            Line::from("  :wq / :x            Save and close"),
+            Line::from("  :new / :tabnew      New request tab"),
+            Line::from("  :send / :run        Execute request"),
+            Line::from("  :col                Focus collections"),
+            Line::from("  :hist               Show history"),
+            Line::from("  :theme <name>       Change theme"),
+            Line::from(""),
+            Line::from("  q / Ctrl+C          Quit"),
             Line::from("  ? / Esc / q         Close this help"),
         ];
 

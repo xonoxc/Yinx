@@ -72,6 +72,7 @@ pub enum KeyAction {
     Undo,
     Redo,
     InsertAtEnd,
+    InsertAtStart,
     InsertLineBelow,
     InsertLineAbove,
     SearchNext,
@@ -84,6 +85,14 @@ pub enum KeyAction {
     ChordPaneNext,
     ChordPaneClose,
     ChordPaneOther,
+    ChordEqualize,
+    ChordMaximizeHeight,
+    ChordMaximizeWidth,
+    GoToDefinition,
+    DeleteLine,
+    SearchResponse,
+    ExpandAll,
+    CollapseAll,
     Unknown,
 }
 
@@ -129,6 +138,7 @@ impl fmt::Display for KeyAction {
             KeyAction::Undo => "undo",
             KeyAction::Redo => "redo",
             KeyAction::InsertAtEnd => "insert_at_end",
+            KeyAction::InsertAtStart => "insert_at_start",
             KeyAction::InsertLineBelow => "insert_line_below",
             KeyAction::InsertLineAbove => "insert_line_above",
             KeyAction::SearchNext => "search_next",
@@ -141,6 +151,14 @@ impl fmt::Display for KeyAction {
             KeyAction::ChordPaneNext => "chord_pane_next",
             KeyAction::ChordPaneClose => "chord_pane_close",
             KeyAction::ChordPaneOther => "chord_pane_other",
+            KeyAction::ChordEqualize => "chord_equalize",
+            KeyAction::ChordMaximizeHeight => "chord_maximize_height",
+            KeyAction::ChordMaximizeWidth => "chord_maximize_width",
+            KeyAction::GoToDefinition => "go_to_definition",
+            KeyAction::DeleteLine => "delete_line",
+            KeyAction::SearchResponse => "search_response",
+            KeyAction::ExpandAll => "expand_all",
+            KeyAction::CollapseAll => "collapse_all",
             KeyAction::Unknown => "unknown",
         };
         write!(f, "{}", s)
@@ -296,7 +314,9 @@ impl KeyBindingConfig {
 
         // Mode switching
         bindings.insert(KeyBinding::new("i", &[]), KeyAction::ModeInsert);
-        bindings.insert(KeyBinding::new("a", &[]), KeyAction::InsertAtEnd);
+        bindings.insert(KeyBinding::new("a", &[]), KeyAction::ModeInsert);
+        bindings.insert(KeyBinding::new("A", &[]), KeyAction::InsertAtEnd);
+        bindings.insert(KeyBinding::new("I", &[]), KeyAction::InsertAtStart);
         bindings.insert(KeyBinding::new("v", &[]), KeyAction::ModeVisual);
         bindings.insert(KeyBinding::new("Esc", &[]), KeyAction::ModeNormal);
 
@@ -308,6 +328,8 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("G", &[]), KeyAction::CursorBottom);
         bindings.insert(KeyBinding::new("d", &["Ctrl"]), KeyAction::PageDown);
         bindings.insert(KeyBinding::new("u", &["Ctrl"]), KeyAction::PageUp);
+        bindings.insert(KeyBinding::new("f", &["Ctrl"]), KeyAction::PageDown);
+        bindings.insert(KeyBinding::new("b", &["Ctrl"]), KeyAction::PageUp);
 
         // Scrolling
         bindings.insert(KeyBinding::new("Up", &[]), KeyAction::ScrollUp);
@@ -330,10 +352,14 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("n", &[]), KeyAction::SearchNext);
         bindings.insert(KeyBinding::new("N", &[]), KeyAction::SearchPrev);
         bindings.insert(KeyBinding::new("u", &[]), KeyAction::Undo);
-        bindings.insert(KeyBinding::new("r", &["Ctrl"]), KeyAction::Redo);
         bindings.insert(KeyBinding::new("o", &[]), KeyAction::InsertLineBelow);
         bindings.insert(KeyBinding::new("O", &[]), KeyAction::InsertLineAbove);
         bindings.insert(KeyBinding::new("p", &[]), KeyAction::Paste);
+        bindings.insert(KeyBinding::new("y", &[]), KeyAction::Yank);
+        bindings.insert(KeyBinding::new("Y", &[]), KeyAction::Yank);
+
+        // Search within response
+        bindings.insert(KeyBinding::new("?", &[]), KeyAction::SearchResponse);
 
         // Tab management
         bindings.insert(KeyBinding::new("t", &[]), KeyAction::NewTab);
@@ -426,8 +452,8 @@ impl InputHandler {
             let chord = self.pending_chord.clone();
             self.pending_chord.clear();
 
-            match chord.as_slice() {
-                // 'g' chord: gg (top), gt (next tab), gT (prev tab)
+                    match chord.as_slice() {
+                // 'g' chord: gg (top), gt (next tab), gT (prev tab), gd (go to definition)
                 [KeyCode::Char('g')] => {
                     match event.code {
                         KeyCode::Char('g') => {
@@ -445,11 +471,40 @@ impl InputHandler {
                             events.push(AppEvent::TabSwitchRelative(-1));
                             return events;
                         }
+                        KeyCode::Char('d') => {
+                            events.push(AppEvent::GoToDefinition);
+                            return events;
+                        }
                         _ => {
                             // Cancel chord: emit 'g', then process this event normally
                             events.push(AppEvent::KeyPressed("g".to_string()));
                         }
                     }
+                }
+                // 'd' chord: dd (delete line)
+                [KeyCode::Char('d')] => {
+                    if matches!(event.code, KeyCode::Char('d')) {
+                        events.push(AppEvent::DeleteLine);
+                        return events;
+                    }
+                    // single d: push the key and process this event normally
+                    events.push(AppEvent::KeyPressed("d".to_string()));
+                }
+                // ']' chord: ]] (expand all)
+                [KeyCode::Char(']')] => {
+                    if matches!(event.code, KeyCode::Char(']')) {
+                        events.push(AppEvent::Scrolled(i64::MAX));
+                        return events;
+                    }
+                    events.push(AppEvent::KeyPressed("]".to_string()));
+                }
+                // '[' chord: [[ (collapse all)
+                [KeyCode::Char('[')] => {
+                    if matches!(event.code, KeyCode::Char('[')) {
+                        events.push(AppEvent::Scrolled(i64::MIN));
+                        return events;
+                    }
+                    events.push(AppEvent::KeyPressed("[".to_string()));
                 }
                 // Ctrl+w chord: pane management
                 [KeyCode::Char('w')] => {
@@ -461,6 +516,9 @@ impl InputHandler {
                         KeyCode::Char('w') => Some(KeyAction::ChordPaneNext),
                         KeyCode::Char('q') => Some(KeyAction::ChordPaneClose),
                         KeyCode::Char('o') => Some(KeyAction::ChordPaneOther),
+                        KeyCode::Char('=') => Some(KeyAction::ChordEqualize),
+                        KeyCode::Char('_') => Some(KeyAction::ChordMaximizeHeight),
+                        KeyCode::Char('|') => Some(KeyAction::ChordMaximizeWidth),
                         KeyCode::Esc => None,
                         _ => {
                             // Cancel chord, process this event normally
@@ -482,6 +540,18 @@ impl InputHandler {
         match event.code {
             KeyCode::Char('g') if event.modifiers.is_empty() => {
                 self.pending_chord.push(KeyCode::Char('g'));
+                return events;
+            }
+            KeyCode::Char('d') if event.modifiers.is_empty() => {
+                self.pending_chord.push(KeyCode::Char('d'));
+                return events;
+            }
+            KeyCode::Char(']') if event.modifiers.is_empty() => {
+                self.pending_chord.push(KeyCode::Char(']'));
+                return events;
+            }
+            KeyCode::Char('[') if event.modifiers.is_empty() => {
+                self.pending_chord.push(KeyCode::Char('['));
                 return events;
             }
             KeyCode::Char('w') if event.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -614,17 +684,18 @@ impl InputHandler {
                 // App-level event, handled in TuiShell
             }
             KeyAction::Yank => {
-                events.push(AppEvent::SaveState);
+                events.push(AppEvent::KeyPressed("yank".to_string()));
             }
             KeyAction::Paste => {
-                // App-level event, handled in TuiShell
+                events.push(AppEvent::KeyPressed("paste".to_string()));
             }
             KeyAction::Undo => {
-                events.push(AppEvent::CursorMoved { lines: 0, cols: -1 });
+                events.push(AppEvent::Scrolled(-1));
             }
-            KeyAction::Redo => {
-                // Ctrl+r is also handled as SendRequest in some contexts
-                events.push(AppEvent::ExecuteRequest);
+            KeyAction::InsertAtStart => {
+                self.mode = InputMode::Insert;
+                events.push(AppEvent::ModeChanged(InputMode::Insert));
+                events.push(AppEvent::InsertAtStart);
             }
             KeyAction::InsertLineBelow => {
                 self.mode = InputMode::Insert;
@@ -635,13 +706,28 @@ impl InputHandler {
                 events.push(AppEvent::ModeChanged(InputMode::Insert));
             }
             KeyAction::SearchNext => {
-                events.push(AppEvent::SearchActivated);
+                events.push(AppEvent::Scrolled(1));
             }
             KeyAction::SearchPrev => {
-                events.push(AppEvent::SearchActivated);
+                events.push(AppEvent::Scrolled(-1));
             }
             KeyAction::OpenConfirm => {
-                // App-level event, handled in TuiShell
+                events.push(AppEvent::KeyPressed("Enter".to_string()));
+            }
+            KeyAction::GoToDefinition => {
+                events.push(AppEvent::GoToDefinition);
+            }
+            KeyAction::DeleteLine => {
+                events.push(AppEvent::DeleteLine);
+            }
+            KeyAction::SearchResponse => {
+                events.push(AppEvent::SearchResponse);
+            }
+            KeyAction::ExpandAll => {
+                events.push(AppEvent::Scrolled(i64::MAX));
+            }
+            KeyAction::CollapseAll => {
+                events.push(AppEvent::Scrolled(i64::MIN));
             }
             KeyAction::ChordPaneLeft => {
                 events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Request));
@@ -666,7 +752,16 @@ impl InputHandler {
                 events.push(AppEvent::TabClosed { id: String::new() });
             }
             KeyAction::ChordPaneOther => {
-                // maximize/minimize pane - app-level
+                events.push(AppEvent::CloseOtherTabs);
+            }
+            KeyAction::ChordEqualize => {
+                events.push(AppEvent::EqualizePanes);
+            }
+            KeyAction::ChordMaximizeHeight => {
+                events.push(AppEvent::MaximizePaneHeight);
+            }
+            KeyAction::ChordMaximizeWidth => {
+                events.push(AppEvent::MaximizePaneWidth);
             }
             KeyAction::Unknown => {}
             _ => {}
@@ -1245,5 +1340,142 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let decoded: KeyBindingConfig = serde_json::from_str(&json).unwrap();
         assert!(!decoded.bindings.is_empty());
+    }
+
+    #[test]
+    fn test_dd_chord_delete_line() {
+        let mut handler = InputHandler::new();
+        let d1 = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE);
+        let events = handler.handle_key(d1);
+        assert!(events.is_empty());
+        assert_eq!(handler.pending_chord, vec![KeyCode::Char('d')]);
+
+        let d2 = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE);
+        let events = handler.handle_key(d2);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::DeleteLine)));
+        assert!(handler.pending_chord.is_empty());
+    }
+
+    #[test]
+    fn test_dd_chord_single_d_falls_through() {
+        let mut handler = InputHandler::new();
+        let d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE);
+        let _ = handler.handle_key(d);
+        assert_eq!(handler.pending_chord, vec![KeyCode::Char('d')]);
+
+        let x = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE);
+        let events = handler.handle_key(x);
+        // single 'd' falls through and doesn't produce DeleteLine
+        assert!(!events.iter().any(|e| matches!(e, AppEvent::DeleteLine)));
+        assert!(handler.pending_chord.is_empty());
+    }
+
+    #[test]
+    fn test_expand_collapse_chords() {
+        let mut handler = InputHandler::new();
+
+        // ]] expand all
+        let bracket1 = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE);
+        let _ = handler.handle_key(bracket1);
+        assert_eq!(handler.pending_chord, vec![KeyCode::Char(']')]);
+        let bracket2 = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE);
+        let events = handler.handle_key(bracket2);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::Scrolled(i64::MAX))));
+
+        // [[ collapse all
+        let bracket3 = KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE);
+        let _ = handler.handle_key(bracket3);
+        assert_eq!(handler.pending_chord, vec![KeyCode::Char('[')]);
+        let bracket4 = KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE);
+        let events = handler.handle_key(bracket4);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::Scrolled(i64::MIN))));
+    }
+
+    #[test]
+    fn test_gd_chord() {
+        let mut handler = InputHandler::new();
+        let g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+        let _ = handler.handle_key(g);
+        assert_eq!(handler.pending_chord, vec![KeyCode::Char('g')]);
+
+        let d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE);
+        let events = handler.handle_key(d);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::GoToDefinition)));
+    }
+
+    #[test]
+    fn test_insert_at_start_binding() {
+        let config = KeyBindingConfig::default_bindings();
+        let event = KeyEvent::new(KeyCode::Char('I'), KeyModifiers::NONE);
+        let action = config.get_action(&event);
+        assert_eq!(action, KeyAction::InsertAtStart);
+
+        let mut handler = InputHandler::new();
+        let events = handler.handle_key(event);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::InsertAtStart)));
+    }
+
+    #[test]
+    fn test_search_response_binding() {
+        let config = KeyBindingConfig::default_bindings();
+        let event = KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE);
+        let action = config.get_action(&event);
+        assert_eq!(action, KeyAction::SearchResponse);
+
+        let mut handler = InputHandler::new();
+        let events = handler.handle_key(event);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::SearchResponse)));
+    }
+
+    #[test]
+    fn test_ctrl_w_equalize_binding() {
+        let mut handler = InputHandler::new();
+        let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        let _ = handler.handle_key(ctrl_w);
+        assert_eq!(handler.pending_chord, vec![KeyCode::Char('w')]);
+
+        let equal = KeyEvent::new(KeyCode::Char('='), KeyModifiers::NONE);
+        let events = handler.handle_key(equal);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::EqualizePanes)));
+    }
+
+    #[test]
+    fn test_ctrl_w_maximize_bindings() {
+        let mut handler = InputHandler::new();
+        let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        let _ = handler.handle_key(ctrl_w);
+        let underscore = KeyEvent::new(KeyCode::Char('_'), KeyModifiers::NONE);
+        let events = handler.handle_key(underscore);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::MaximizePaneHeight)));
+
+        let mut handler = InputHandler::new();
+        let _ = handler.handle_key(ctrl_w);
+        let pipe = KeyEvent::new(KeyCode::Char('|'), KeyModifiers::NONE);
+        let events = handler.handle_key(pipe);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::MaximizePaneWidth)));
+    }
+
+    #[test]
+    fn test_ctrl_w_close_other_tabs() {
+        let mut handler = InputHandler::new();
+        let ctrl_w = KeyEvent::new(KeyCode::Char('w'), KeyModifiers::CONTROL);
+        let _ = handler.handle_key(ctrl_w);
+        let o = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::NONE);
+        let events = handler.handle_key(o);
+        assert!(events.iter().any(|e| matches!(e, AppEvent::CloseOtherTabs)));
+    }
+
+    #[test]
+    fn test_no_conflicting_bindings() {
+        use std::collections::HashSet;
+        let config = KeyBindingConfig::default_bindings();
+        let mut seen = HashSet::new();
+        for (binding, action) in &config.bindings {
+            let key = format!("{}+{}", binding.modifiers.join("+"), binding.key);
+            if seen.contains(&key) {
+                panic!("Duplicate binding: {} maps to {:?}", key, action);
+            }
+            seen.insert(key);
+        }
     }
 }
