@@ -5,8 +5,10 @@ pub mod input;
 pub mod layout;
 pub mod logs_pane;
 pub mod request_pane;
+pub mod response_pane;
 pub mod settings_pane;
 pub mod theme;
+pub mod virtual_scroll;
 pub mod widgets;
 
 pub use app::{run_tui, with_error_boundary, App, AppError, EventLoop, TerminalGuard};

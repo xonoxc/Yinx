@@ -12,7 +12,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Terminal as RatatuiTerminal;
 
 use crate::command_palette::{CommandPalette, PaletteAction};
@@ -20,16 +20,17 @@ use crate::editor::{self, EditorError, EditorFormat, SystemEditorRunner, Termina
 use crate::layout::Layout;
 use crate::logs_pane::{LogLevel, LogsPane};
 use crate::request_pane::RequestPane;
+use crate::response_pane::ResponsePane;
 use crate::settings_pane::SettingsPane;
 use crate::theme::{Theme, ThemeRegistry};
 use crate::widgets::StatusBar;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
-use yinx_core::response::{Response, ResponseBody};
 #[cfg(test)]
 use yinx_core::state::UiState;
 use yinx_core::state::{ActivePane, InputMode, NetworkState};
 use yinx_core::timing::{RequestMetrics, Timing};
 use yinx_http::client::HttpClient;
+use yinx_http::controller::{RequestController, RequestEvent};
 
 use crate::input::InputHandler;
 
@@ -65,6 +66,8 @@ pub async fn run_tui() -> Result<(), AppError> {
         if shell.should_quit() {
             break;
         }
+
+        shell.check_request_completion();
 
         if event::poll(Duration::from_millis(50)).map_err(|e| AppError::EventLoop(e.to_string()))? {
             let event = event::read().map_err(|e| AppError::EventLoop(e.to_string()))?;
@@ -142,16 +145,17 @@ struct TuiShell {
     theme_registry: ThemeRegistry,
     layout: Layout,
     request_pane: RequestPane,
+    response_pane: ResponsePane,
     logs_pane: LogsPane,
     settings_pane: SettingsPane,
     active_pane: ActivePane,
     network_state: NetworkState,
-    latest_response: Option<Response>,
-    latest_error: Option<String>,
     should_quit: bool,
     show_help: bool,
     input_handler: InputHandler,
     command_palette: CommandPalette,
+    request_controller: RequestController,
+    request_rx: Option<tokio::sync::oneshot::Receiver<RequestEvent>>,
 }
 
 impl TuiShell {
@@ -188,16 +192,17 @@ impl TuiShell {
             theme_registry,
             layout,
             request_pane: RequestPane::new(),
+            response_pane: ResponsePane::new(),
             logs_pane,
             settings_pane,
             active_pane: ActivePane::Request,
             network_state: NetworkState::Idle,
-            latest_response: None,
-            latest_error: None,
             should_quit: false,
             show_help: false,
             input_handler: InputHandler::new(),
             command_palette: CommandPalette::new(),
+            request_controller: RequestController::new(),
+            request_rx: None,
         }
     }
 
@@ -289,7 +294,7 @@ impl TuiShell {
                                         LogLevel::Error,
                                         e.to_string(),
                                     );
-                                    self.latest_error = Some(e.to_string());
+                                    self.response_pane.set_error(e.to_string());
                                 }
                             }
                             AppEvent::SaveState => {
@@ -439,14 +444,14 @@ impl TuiShell {
                 AppEvent::SendRequest(req) => {
                     if let Err(e) = self.execute_request_with(req).await {
                         self.logs_pane.add_log(LogLevel::Error, e.to_string());
-                        self.latest_error = Some(e.to_string());
+                        self.response_pane.set_error(e.to_string());
                     }
                     handled = true;
                 }
                 AppEvent::ExecuteRequest => {
                     if let Err(e) = self.execute_request().await {
                         self.logs_pane.add_log(LogLevel::Error, e.to_string());
-                        self.latest_error = Some(e.to_string());
+                        self.response_pane.set_error(e.to_string());
                     }
                     handled = true;
                 }
@@ -506,8 +511,8 @@ impl TuiShell {
         request: yinx_core::request::Request,
     ) -> Result<(), AppError> {
         let timeout_secs = self.settings_pane.config.defaults.default_timeout_secs;
-        let follow_redirects = self.settings_pane.config.defaults.follow_redirects;
-        let verify_tls = self.settings_pane.config.defaults.verify_tls;
+        let _follow_redirects = self.settings_pane.config.defaults.follow_redirects;
+        let _verify_tls = self.settings_pane.config.defaults.verify_tls;
 
         self.logs_pane.set_current_request(request.clone());
         self.logs_pane.add_log(
@@ -515,52 +520,15 @@ impl TuiShell {
             format!("Sending {} {}", request.method, request.url.as_str()),
         );
         self.network_state = NetworkState::Loading;
-        self.latest_error = None;
 
-        let started_at = std::time::Instant::now();
         let client = HttpClient::new()
             .map_err(|e| AppError::Render(e.to_string()))?
             .with_timeout(timeout_secs)
-            .with_follow_redirects(follow_redirects)
-            .with_tls_verify(verify_tls);
+            .with_follow_redirects(_follow_redirects)
+            .with_tls_verify(_verify_tls);
 
-        match client.send_request(request).await {
-            Ok(mut response) => {
-                let elapsed_ms = started_at.elapsed().as_millis() as u64;
-                response.timing_ms = elapsed_ms;
-
-                let metrics = RequestMetrics::new()
-                    .with_timing(Timing::new().with_total(elapsed_ms))
-                    .with_status_code(response.status.code())
-                    .with_body_size(response.body_size());
-                self.logs_pane.set_metrics(metrics);
-
-                if response.is_error() {
-                    self.logs_pane.add_log(
-                        LogLevel::Warning,
-                        format!("Request completed with {}", response.status),
-                    );
-                } else {
-                    self.logs_pane.add_log(
-                        LogLevel::Info,
-                        format!(
-                            "Request completed with {} in {}ms",
-                            response.status, elapsed_ms
-                        ),
-                    );
-                }
-
-                self.latest_response = Some(response);
-                self.network_state = NetworkState::Idle;
-                self.active_pane = ActivePane::Response;
-            }
-            Err(error) => {
-                let message = error.to_string();
-                self.logs_pane.add_log(LogLevel::Error, message.clone());
-                self.latest_error = Some(message.clone());
-                self.network_state = NetworkState::Error(message);
-            }
-        }
+        let rx = self.request_controller.execute(request, client);
+        self.request_rx = Some(rx);
 
         Ok(())
     }
@@ -585,75 +553,68 @@ impl TuiShell {
             ActivePane::Logs => {
                 let _ = self.logs_pane.handle_key(code, key_event.modifiers);
             }
-            ActivePane::Response => {}
+            ActivePane::Response => {
+                let _ = self.response_pane.handle_key(code);
+            }
             _ => {}
         }
     }
 
     async fn execute_request(&mut self) -> Result<(), AppError> {
         let timeout_secs = self.settings_pane.config.defaults.default_timeout_secs;
-        let follow_redirects = self.settings_pane.config.defaults.follow_redirects;
-        let verify_tls = self.settings_pane.config.defaults.verify_tls;
-
         let request = self
             .request_pane
             .to_request(timeout_secs)
             .map_err(|e| AppError::Render(e.to_string()))?;
 
-        self.logs_pane.set_current_request(request.clone());
-        self.logs_pane.add_log(
-            LogLevel::Info,
-            format!("Sending {} {}", request.method, request.url.as_str()),
-        );
-        self.network_state = NetworkState::Loading;
-        self.latest_error = None;
+        self.execute_request_with(request).await
+    }
 
-        let started_at = std::time::Instant::now();
-        let client = HttpClient::new()
-            .map_err(|e| AppError::Render(e.to_string()))?
-            .with_timeout(timeout_secs)
-            .with_follow_redirects(follow_redirects)
-            .with_tls_verify(verify_tls);
+    fn check_request_completion(&mut self) {
+        if let Some(rx) = &mut self.request_rx {
+            match rx.try_recv() {
+                Ok(event) => {
+                    match event {
+                        RequestEvent::Completed(response, elapsed_ms) => {
+                            let metrics = RequestMetrics::new()
+                                .with_timing(Timing::new().with_total(elapsed_ms))
+                                .with_status_code(response.status.code())
+                                .with_body_size(response.body_size());
+                            self.logs_pane.set_metrics(metrics);
 
-        match client.send_request(request).await {
-            Ok(mut response) => {
-                let elapsed_ms = started_at.elapsed().as_millis() as u64;
-                response.timing_ms = elapsed_ms;
+                            if response.is_error() {
+                                self.logs_pane.add_log(
+                                    LogLevel::Warning,
+                                    format!("Request completed with {}", response.status),
+                                );
+                            } else {
+                                self.logs_pane.add_log(
+                                    LogLevel::Info,
+                                    format!(
+                                        "Request completed with {} in {}ms",
+                                        response.status, elapsed_ms
+                                    ),
+                                );
+                            }
 
-                let metrics = RequestMetrics::new()
-                    .with_timing(Timing::new().with_total(elapsed_ms))
-                    .with_status_code(response.status.code())
-                    .with_body_size(response.body_size());
-                self.logs_pane.set_metrics(metrics);
-
-                if response.is_error() {
-                    self.logs_pane.add_log(
-                        LogLevel::Warning,
-                        format!("Request completed with {}", response.status),
-                    );
-                } else {
-                    self.logs_pane.add_log(
-                        LogLevel::Info,
-                        format!(
-                            "Request completed with {} in {}ms",
-                            response.status, elapsed_ms
-                        ),
-                    );
+                            self.response_pane.set_response(response);
+                            self.network_state = NetworkState::Idle;
+                            self.active_pane = ActivePane::Response;
+                        }
+                        RequestEvent::Failed(message) => {
+                            self.logs_pane.add_log(LogLevel::Error, message.clone());
+                            self.response_pane.set_error(message.clone());
+                            self.network_state = NetworkState::Error(message);
+                        }
+                    }
+                    self.request_rx = None;
                 }
-
-                self.latest_response = Some(response);
-                self.network_state = NetworkState::Idle;
-                self.active_pane = ActivePane::Response;
-            }
-            Err(error) => {
-                let message = error.to_string();
-                self.logs_pane.add_log(LogLevel::Error, message.clone());
-                self.latest_error = Some(message.clone());
-                self.network_state = NetworkState::Error(message);
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    self.request_rx = None;
+                }
             }
         }
-
-        Ok(())
     }
 
     fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
@@ -702,9 +663,10 @@ impl TuiShell {
             &self.theme,
             self.active_pane == ActivePane::Request,
         );
-        self.render_response_pane(
+        self.response_pane.render(
             frame,
             off(pane_rects.response),
+            &self.theme,
             self.active_pane == ActivePane::Response,
         );
         self.logs_pane.render(
@@ -722,8 +684,8 @@ impl TuiShell {
             InputMode::Command => "COMMAND",
         };
         let response_meta = self
-            .latest_response
-            .as_ref()
+            .response_pane
+            .response()
             .map(|response| format!("{} {}ms", response.status, response.timing_ms))
             .unwrap_or_else(|| "No response".to_string());
         let focus_label = match self.active_pane {
@@ -823,110 +785,7 @@ impl TuiShell {
         frame.render_widget(paragraph, inner);
     }
 
-    fn render_response_pane(&self, frame: &mut ratatui::Frame<'_>, area: Rect, is_active: bool) {
-        let block = Block::default()
-            .title(if let Some(response) = &self.latest_response {
-                format!("RESPONSE  {}  {}ms", response.status, response.timing_ms)
-            } else {
-                "RESPONSE".to_string()
-            })
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(self.theme.border_color(is_active)))
-            .style(Style::default().bg(self.theme.pane_bg(is_active)).fg(self.theme.foreground.as_color()));
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
 
-        let mut lines = Vec::new();
-
-        for warning in self.layout.validate() {
-            lines.push(Line::from(Span::styled(
-                warning,
-                Style::default().fg(self.theme.semantic.warning.as_color()),
-            )));
-        }
-
-        if let Some(error) = &self.latest_error {
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!("Last error: {error}"),
-                Style::default().fg(self.theme.semantic.error.as_color()),
-            )));
-        }
-
-        if let Some(response) = &self.latest_response {
-            lines.push(Line::from(vec![
-                Span::styled("Status ", Style::default().fg(self.theme.muted_color())),
-                Span::styled(
-                    response.status.to_string(),
-                    Style::default().fg(if response.is_error() {
-                        self.theme.semantic.error.as_color()
-                    } else {
-                        self.theme.semantic.success.as_color()
-                    }),
-                ),
-                Span::raw("   "),
-                Span::styled("Size ", Style::default().fg(self.theme.muted_color())),
-                Span::styled(
-                    format!("{}b", response.body_size()),
-                    Style::default().fg(self.theme.foreground.as_color()),
-                ),
-                Span::raw("   "),
-                Span::styled("Type ", Style::default().fg(self.theme.muted_color())),
-                Span::styled(
-                    response.content_type().unwrap_or("unknown").to_string(),
-                    Style::default().fg(self.theme.foreground.as_color()),
-                ),
-            ]));
-            lines.push(Line::from(""));
-
-            for line in response_body_preview(response).lines().take(20) {
-                lines.push(Line::from(line.to_string()));
-            }
-        } else {
-            lines.push(Line::from(Span::styled(
-                "No response yet.",
-                Style::default()
-                    .fg(self.theme.title_color(is_active))
-                    .add_modifier(ratatui::style::Modifier::BOLD),
-            )));
-            lines.push(Line::from(Span::styled(
-                "Build the request on the left, send it, and the preview will land here.",
-                Style::default().fg(self.theme.placeholder_color()),
-            )));
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::styled("Method ", Style::default().fg(self.theme.muted_color())),
-                Span::styled(
-                    self.request_pane.method().to_string(),
-                    Style::default().fg(self.theme.foreground.as_color()),
-                ),
-            ]));
-            lines.push(Line::from(vec![
-                Span::styled("URL    ", Style::default().fg(self.theme.muted_color())),
-                Span::styled(
-                    {
-                        let url = self.request_pane.url();
-                        if url.is_empty() {
-                            "https://api.example.com".to_string()
-                        } else {
-                            url
-                        }
-                    },
-                    Style::default().fg(self.theme.foreground.as_color()),
-                ),
-            ]));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                "Hints: Tab switch panes, / search logs, Ctrl+R send request.",
-                Style::default().fg(self.theme.placeholder_color()),
-            )));
-        }
-
-        let paragraph = Paragraph::new(lines)
-            .style(Style::default().fg(self.theme.foreground.as_color()))
-            .wrap(Wrap { trim: false });
-        frame.render_widget(paragraph, inner);
-    }
 }
 
 fn key_to_app_event(key_event: KeyEvent) -> Option<AppEvent> {
@@ -949,17 +808,6 @@ fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect::new(x, y, width.max(1), height.max(1))
-}
-
-fn response_body_preview(response: &Response) -> String {
-    match &response.body {
-        ResponseBody::Json(_) => response
-            .body
-            .pretty_json()
-            .unwrap_or_else(|| response.body.to_string()),
-        ResponseBody::Text(_) => response.body.as_text().unwrap_or_default(),
-        _ => response.body.to_string(),
-    }
 }
 
 pub struct EventLoop {
