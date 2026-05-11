@@ -7,6 +7,8 @@ pub mod logs_pane;
 pub mod request_pane;
 pub mod response_pane;
 pub mod settings_pane;
+pub mod sidebar;
+pub mod tab_bar;
 pub mod theme;
 pub mod virtual_scroll;
 pub mod widgets;
@@ -23,3 +25,5 @@ pub use request_pane::{
     AuthType, BodyType, EditableField, FocusedField, RequestPane, RequestPaneEditSpec, RequestTab,
 };
 pub use settings_pane::SettingsPane;
+pub use sidebar::{Sidebar, SidebarItem, SidebarSection};
+pub use tab_bar::TabBar;

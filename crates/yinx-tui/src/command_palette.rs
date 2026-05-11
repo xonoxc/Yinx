@@ -194,7 +194,8 @@ impl CommandPalette {
             return;
         }
 
-        let palette_height = (self.matches.len().min(10) as u16 + 3).min(area.height.saturating_sub(2));
+        let palette_height =
+            (self.matches.len().min(10) as u16 + 3).min(area.height.saturating_sub(2));
         let palette_width = area.width.saturating_mul(60).saturating_div(100).max(40);
 
         let x = area.x + area.width.saturating_sub(palette_width) / 2;
@@ -238,12 +239,7 @@ impl CommandPalette {
         let list_start_y = inner.y + 1;
         let max_items = inner.height.saturating_sub(1).min(10) as usize;
 
-        let visible_matches: Vec<_> = self
-            .matches
-            .iter()
-            .take(max_items)
-            .enumerate()
-            .collect();
+        let visible_matches: Vec<_> = self.matches.iter().take(max_items).enumerate().collect();
 
         for (display_idx, cmd_match) in &visible_matches {
             let is_selected = *display_idx == self.selected;
@@ -274,7 +270,9 @@ impl CommandPalette {
 
             let name_span = Span::styled(
                 format!("  {}", cmd_match.command_name),
-                Style::default().fg(category_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(category_color)
+                    .add_modifier(Modifier::BOLD),
             );
             let desc_span = Span::styled(
                 format!("  {}", cmd_match.description),

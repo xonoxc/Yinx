@@ -17,17 +17,22 @@ use ratatui::Terminal as RatatuiTerminal;
 
 use crate::command_palette::{CommandPalette, PaletteAction};
 use crate::editor::{self, EditorError, EditorFormat, SystemEditorRunner, TerminalSession};
-use crate::layout::Layout;
+use crate::layout::{WorkspaceLayout, WorkspaceRects};
 use crate::logs_pane::{LogLevel, LogsPane};
 use crate::request_pane::RequestPane;
 use crate::response_pane::ResponsePane;
 use crate::settings_pane::SettingsPane;
+use crate::sidebar::{Sidebar, SidebarItem, SidebarSection};
+use crate::tab_bar::TabBar;
 use crate::theme::{Theme, ThemeRegistry};
 use crate::widgets::StatusBar;
+use yinx_core::collections::{Collection, CollectionItem};
+use yinx_core::environments::Environment;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 #[cfg(test)]
 use yinx_core::state::UiState;
 use yinx_core::state::{ActivePane, InputMode, NetworkState};
+use yinx_core::tabs::{Tab, TabManager};
 use yinx_core::timing::{RequestMetrics, Timing};
 use yinx_http::client::HttpClient;
 use yinx_http::controller::{RequestController, RequestEvent};
@@ -143,7 +148,10 @@ impl Drop for TerminalGuard {
 struct TuiShell {
     theme: Theme,
     theme_registry: ThemeRegistry,
-    layout: Layout,
+    workspace_layout: WorkspaceLayout,
+    sidebar: Sidebar,
+    tab_bar: TabBar,
+    tab_manager: TabManager,
     request_pane: RequestPane,
     response_pane: ResponsePane,
     logs_pane: LogsPane,
@@ -160,12 +168,6 @@ struct TuiShell {
 
 impl TuiShell {
     fn new(width: u16, height: u16) -> Self {
-        let mut layout = Layout::new();
-        layout.update_terminal_size(width, height);
-        if height < 30 {
-            layout.toggle_split_direction();
-        }
-
         let mut logs_pane = LogsPane::new();
         logs_pane.add_log(
             LogLevel::Info,
@@ -187,10 +189,20 @@ impl TuiShell {
             .cloned()
             .unwrap_or_else(Theme::terminal_default);
 
+        let mut workspace_layout = WorkspaceLayout::new();
+        workspace_layout.update_terminal_size(width, height);
+
+        let sidebar = Sidebar::new();
+        let tab_bar = TabBar::new();
+        let tab_manager = TabManager::new(20);
+
         Self {
             theme,
             theme_registry,
-            layout,
+            workspace_layout,
+            sidebar,
+            tab_bar,
+            tab_manager,
             request_pane: RequestPane::new(),
             response_pane: ResponsePane::new(),
             logs_pane,
@@ -233,7 +245,7 @@ impl TuiShell {
         match event {
             Event::Key(key_event) => self.handle_key(key_event).await,
             Event::Resize(width, height) => {
-                self.layout.update_terminal_size(width, height);
+                self.workspace_layout.update_terminal_size(width, height);
                 Ok(())
             }
             Event::Mouse(mouse_event) => {
@@ -251,15 +263,16 @@ impl TuiShell {
             return;
         }
 
-        let rects = self.layout.calculate();
+        let wrects = self.workspace_layout.calculate();
 
-        // Check which pane was clicked based on coordinates
-        if self.is_in_rect(mouse_event.column, mouse_event.row, rects.response) {
+        if self.is_in_rect(mouse_event.column, mouse_event.row, wrects.sidebar)
+            && wrects.sidebar.width > 0
+        {
+            self.active_pane = ActivePane::Sidebar;
+        } else if self.is_in_rect(mouse_event.column, mouse_event.row, wrects.center_bottom) {
             self.active_pane = ActivePane::Response;
-        } else if self.is_in_rect(mouse_event.column, mouse_event.row, rects.request) {
+        } else if self.is_in_rect(mouse_event.column, mouse_event.row, wrects.center_top) {
             self.active_pane = ActivePane::Request;
-        } else if self.is_in_rect(mouse_event.column, mouse_event.row, rects.logs) {
-            self.active_pane = ActivePane::Logs;
         }
     }
 
@@ -290,16 +303,12 @@ impl TuiShell {
                             }
                             AppEvent::ExecuteRequest => {
                                 if let Err(e) = self.execute_request().await {
-                                    self.logs_pane.add_log(
-                                        LogLevel::Error,
-                                        e.to_string(),
-                                    );
+                                    self.logs_pane.add_log(LogLevel::Error, e.to_string());
                                     self.response_pane.set_error(e.to_string());
                                 }
                             }
                             AppEvent::SaveState => {
-                                self.logs_pane
-                                    .add_log(LogLevel::Info, "State saved");
+                                self.logs_pane.add_log(LogLevel::Info, "State saved");
                             }
                             AppEvent::SearchActivated => {
                                 // handled by pane
@@ -308,10 +317,7 @@ impl TuiShell {
                                 self.show_help = true;
                             }
                             AppEvent::ImportStarted { .. } => {
-                                self.logs_pane.add_log(
-                                    LogLevel::Info,
-                                    "Import triggered",
-                                );
+                                self.logs_pane.add_log(LogLevel::Info, "Import triggered");
                             }
                             _ => {}
                         }
@@ -355,33 +361,35 @@ impl TuiShell {
             }
         }
 
-        // Normal-mode global operations: resize, help, layout toggle
+        // Normal-mode global operations: resize, help, layout toggle, sidebar toggle
         if self.input_handler.current_mode() == InputMode::Normal {
             match key_event.code {
                 KeyCode::Char('?') => {
                     self.show_help = true;
                     return Ok(());
                 }
+                KeyCode::Char('b') if key_event.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.workspace_layout.toggle_sidebar();
+                    return Ok(());
+                }
                 KeyCode::Char('+') | KeyCode::Char('=') => {
                     match self.active_pane {
-                        ActivePane::Request => self.layout.resize_request_pane(5),
-                        ActivePane::Response => self.layout.resize_response_pane(5),
-                        ActivePane::Logs => self.layout.resize_logs_pane(5),
+                        ActivePane::Sidebar => self.workspace_layout.resize_sidebar(5),
+                        ActivePane::Request | ActivePane::Response => {
+                            self.workspace_layout.resize_center_split(0.05)
+                        }
                         _ => {}
                     }
                     return Ok(());
                 }
                 KeyCode::Char('-') | KeyCode::Char('_') => {
                     match self.active_pane {
-                        ActivePane::Request => self.layout.resize_request_pane(-5),
-                        ActivePane::Response => self.layout.resize_response_pane(-5),
-                        ActivePane::Logs => self.layout.resize_logs_pane(-5),
+                        ActivePane::Sidebar => self.workspace_layout.resize_sidebar(-5),
+                        ActivePane::Request | ActivePane::Response => {
+                            self.workspace_layout.resize_center_split(-0.05)
+                        }
                         _ => {}
                     }
-                    return Ok(());
-                }
-                KeyCode::F(7) => {
-                    self.layout.toggle_split_direction();
                     return Ok(());
                 }
                 KeyCode::F(10) => {
@@ -425,18 +433,20 @@ impl TuiShell {
                 }
                 AppEvent::CyclePaneNext => {
                     self.active_pane = match self.active_pane {
+                        ActivePane::Sidebar => ActivePane::Request,
                         ActivePane::Request => ActivePane::Response,
                         ActivePane::Response => ActivePane::Logs,
-                        ActivePane::Logs => ActivePane::Request,
+                        ActivePane::Logs => ActivePane::Sidebar,
                         _ => ActivePane::Request,
                     };
                     handled = true;
                 }
                 AppEvent::CyclePanePrev => {
                     self.active_pane = match self.active_pane {
-                        ActivePane::Request => ActivePane::Logs,
+                        ActivePane::Sidebar => ActivePane::Logs,
                         ActivePane::Logs => ActivePane::Response,
                         ActivePane::Response => ActivePane::Request,
+                        ActivePane::Request => ActivePane::Sidebar,
                         _ => ActivePane::Request,
                     };
                     handled = true;
@@ -473,17 +483,23 @@ impl TuiShell {
                     handled = true;
                 }
                 AppEvent::TabSwitchRelative(delta) => {
-                    self.logs_pane.add_log(
-                        LogLevel::Info,
-                        format!("Tab switch relative: {}", delta),
-                    );
+                    if !self.tab_manager.is_empty() {
+                        self.tab_manager.navigate(delta as i32);
+                    }
                     handled = true;
                 }
                 AppEvent::TabOpened { .. } => {
-                    self.logs_pane.add_log(LogLevel::Info, "New tab opened");
+                    let id = self.tab_manager.open_blank();
+                    self.logs_pane
+                        .add_log(LogLevel::Info, format!("New tab opened: {}", id));
                     handled = true;
                 }
-                AppEvent::TabClosed { .. } => {
+                AppEvent::TabClosed { id, .. } => {
+                    if !id.is_empty() {
+                        self.tab_manager.close(&id);
+                    } else {
+                        self.tab_manager.close_active();
+                    }
                     self.logs_pane.add_log(LogLevel::Info, "Tab closed");
                     handled = true;
                 }
@@ -547,6 +563,9 @@ impl TuiShell {
             key_event.code
         };
         match self.active_pane {
+            ActivePane::Sidebar => {
+                let _ = self.sidebar.handle_key(code);
+            }
             ActivePane::Request => {
                 let _ = self.request_pane.handle_key(code, key_event.modifiers);
             }
@@ -619,63 +638,99 @@ impl TuiShell {
 
     fn render(&mut self, frame: &mut ratatui::Frame<'_>) {
         let area = frame.area();
+        let (term_width, term_height) = (area.width, area.height);
+        self.workspace_layout
+            .update_terminal_size(term_width, term_height);
 
-        let outer = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(self.theme.border.color.as_color()))
-            .style(
-                Style::default().bg(self
-                    .theme
-                    .background
-                    .as_ref()
-                    .map(|c| c.as_color())
-                    .unwrap_or(ratatui::style::Color::Reset)),
+        if term_width < 60 || term_height < 12 {
+            self.render_minimal_fallback(frame, area);
+            return;
+        }
+
+        self.render_workspace(frame, area);
+
+        if self.show_help {
+            self.render_help(frame, area);
+        }
+
+        if self.command_palette.is_visible() {
+            self.command_palette.render(frame, area, &self.theme);
+        }
+    }
+
+    fn render_workspace(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let wrects = self.workspace_layout.calculate();
+
+        // Sidebar
+        if wrects.sidebar.width > 0 {
+            self.sidebar.render(
+                frame,
+                wrects.sidebar,
+                &self.theme,
+                self.active_pane == ActivePane::Sidebar,
             );
-        let inner = outer.inner(area);
-        frame.render_widget(outer, area);
+        }
 
-        let saved = self.layout.terminal_size();
-        self.layout.update_terminal_size(inner.width, inner.height);
-
-        // Auto-resize request pane to fit URL content
-        self.layout
-            .auto_resize_request_to_fit(self.request_pane.url().len());
-
-        let pane_rects = self
-            .layout
-            .calculate_with_context(crate::layout::LayoutContext {
-                show_logs: true,
-                compact_logs: self.logs_pane.should_compact()
-                    && self.active_pane != ActivePane::Logs
-                    && self.network_state == NetworkState::Idle,
-            });
-        self.layout.update_terminal_size(saved.0, saved.1);
-
-        let off = |mut r: ratatui::layout::Rect| {
-            r.x += inner.x;
-            r.y += inner.y;
-            r
-        };
-
-        self.request_pane.render(
+        // Tab bar
+        self.tab_bar.render(
             frame,
-            off(pane_rects.request),
+            wrects.tab_bar,
+            &self.tab_manager,
             &self.theme,
             self.active_pane == ActivePane::Request,
         );
+
+        // Request pane (compact)
+        self.request_pane.set_compact(true);
+        self.request_pane.render_compact(
+            frame,
+            wrects.center_top,
+            &self.theme,
+            self.active_pane == ActivePane::Request,
+        );
+
+        // Response pane
         self.response_pane.render(
             frame,
-            off(pane_rects.response),
+            wrects.center_bottom,
             &self.theme,
             self.active_pane == ActivePane::Response,
         );
-        self.logs_pane.render(
-            frame,
-            off(pane_rects.logs),
-            &self.theme,
-            self.active_pane == ActivePane::Logs,
-        );
 
+        // Status bar
+        self.render_status_bar(frame, wrects.status_bar);
+
+        // Settings overlay
+        if self.settings_pane.is_open() {
+            self.settings_pane
+                .render(frame, centered_rect(area, 70, 70), &self.theme);
+        }
+    }
+
+    fn render_minimal_fallback(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+        let (w, h) = (area.width, area.height);
+        let text = format!(
+            "Terminal too small\n\nResize to at least 60x12\nCurrent: {}x{}\n\n[q] quit",
+            w, h
+        );
+        let block = Block::default()
+            .title(" YINX ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(self.theme.semantic.warning.as_color()))
+            .style(
+                Style::default()
+                    .bg(self.theme.pane.bg_color())
+                    .fg(self.theme.foreground.as_color()),
+            );
+        let paragraph = Paragraph::new(text)
+            .block(block)
+            .style(Style::default().fg(self.theme.foreground.as_color()))
+            .alignment(Alignment::Center)
+            .wrap(ratatui::widgets::Wrap { trim: true });
+        frame.render_widget(paragraph, area);
+    }
+
+    fn render_status_bar(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
         let current_mode = self.input_handler.current_mode();
         let mode_str = match current_mode {
             InputMode::Normal => "NORMAL",
@@ -689,6 +744,7 @@ impl TuiShell {
             .map(|response| format!("{} {}ms", response.status, response.timing_ms))
             .unwrap_or_else(|| "No response".to_string());
         let focus_label = match self.active_pane {
+            ActivePane::Sidebar => "SIDEBAR",
             ActivePane::Request => "REQUEST CONFIG",
             ActivePane::Response => "RESPONSE",
             ActivePane::Logs => "ACTIVITY",
@@ -702,23 +758,10 @@ impl TuiShell {
             .with_hints(vec![
                 ("Tab", "Panes"),
                 ("^R", "Send"),
+                ("Ctrl+b", "Sidebar"),
                 ("Esc/q", "Quit"),
-                ("/", "Search"),
             ]);
-        status.render(frame, off(pane_rects.status_bar), &self.theme);
-
-        if self.settings_pane.is_open() {
-            self.settings_pane
-                .render(frame, centered_rect(area, 70, 70), &self.theme);
-        }
-
-        if self.show_help {
-            self.render_help(frame, area);
-        }
-
-        if self.command_palette.is_visible() {
-            self.command_palette.render(frame, area, &self.theme);
-        }
+        status.render(frame, area, &self.theme);
     }
 
     fn render_help(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
@@ -729,27 +772,31 @@ impl TuiShell {
                 Style::default().add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
             )),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Pane Navigation", Style::default().add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Pane Navigation",
+                Style::default().add_modifier(Modifier::BOLD),
+            )]),
             Line::from("  Tab / Shift+Tab    Cycle panes forward/backward"),
             Line::from("  Ctrl+1/2/3/4       Jump to Request/Response/Workflow/Logs"),
             Line::from("  Mouse click         Focus pane under cursor"),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Resize Active Pane", Style::default().add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Resize Active Pane",
+                Style::default().add_modifier(Modifier::BOLD),
+            )]),
             Line::from("  + / =               Expand active pane"),
             Line::from("  - / _               Shrink active pane"),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Layout", Style::default().add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Layout",
+                Style::default().add_modifier(Modifier::BOLD),
+            )]),
             Line::from("  F7                  Cycle layout preset"),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Editing (Normal mode)", Style::default().add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Editing (Normal mode)",
+                Style::default().add_modifier(Modifier::BOLD),
+            )]),
             Line::from("  i                   Enter Insert mode"),
             Line::from("  v                   Enter Visual mode"),
             Line::from("  Esc                 Return to Normal mode"),
@@ -757,9 +804,10 @@ impl TuiShell {
             Line::from("  Ctrl+D / Ctrl+U     Page down / Page up"),
             Line::from("  Backspace           Delete character before cursor"),
             Line::from(""),
-            Line::from(vec![
-                Span::styled("Actions", Style::default().add_modifier(Modifier::BOLD)),
-            ]),
+            Line::from(vec![Span::styled(
+                "Actions",
+                Style::default().add_modifier(Modifier::BOLD),
+            )]),
             Line::from("  Ctrl+R / Ctrl+Enter Send request"),
             Line::from("  Ctrl+S              Save state"),
             Line::from("  T / Shift+T         Cycle theme"),
@@ -773,7 +821,11 @@ impl TuiShell {
             .borders(Borders::ALL)
             .title(" HELP ")
             .border_style(Style::default().fg(self.theme.border.active_color.as_color()))
-            .style(Style::default().bg(self.theme.pane_bg(true)).fg(self.theme.foreground.as_color()));
+            .style(
+                Style::default()
+                    .bg(self.theme.pane_bg(true))
+                    .fg(self.theme.foreground.as_color()),
+            );
 
         let inner = help_block.inner(help_rect);
         frame.render_widget(Clear, help_rect);
@@ -784,8 +836,6 @@ impl TuiShell {
             .alignment(Alignment::Left);
         frame.render_widget(paragraph, inner);
     }
-
-
 }
 
 fn key_to_app_event(key_event: KeyEvent) -> Option<AppEvent> {
@@ -1274,11 +1324,11 @@ mod tests {
     #[test]
     fn test_mouse_click_focuses_pane() {
         let mut shell = TuiShell::new(80, 24);
-        let rects = shell.layout.calculate();
+        let rects = shell.workspace_layout.calculate();
 
-        // Click in the middle of Response pane
-        let row = rects.response.y + rects.response.height / 2;
-        let col = rects.response.x + rects.response.width / 2;
+        // Click in the middle of Response pane (center_bottom)
+        let row = rects.center_bottom.y + rects.center_bottom.height / 2;
+        let col = rects.center_bottom.x + rects.center_bottom.width / 2;
 
         let mouse_event = crossterm::event::MouseEvent {
             kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),

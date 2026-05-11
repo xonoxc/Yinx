@@ -1,4 +1,4 @@
-use ratatui::layout::{Constraint, Direction, Layout as RatatuiLayout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout as RatatuiLayout, Margin, Rect};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -479,6 +479,193 @@ impl Layout {
 impl Default for Layout {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ── Phase 1.1: New WorkspaceLayout ──────────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WorkspaceRects {
+    pub sidebar: Rect,
+    pub center_top: Rect,
+    pub center_bottom: Rect,
+    pub status_bar: Rect,
+    pub tab_bar: Rect,
+}
+
+impl WorkspaceRects {
+    pub fn center_column(&self) -> Rect {
+        Rect::new(
+            self.center_top.x,
+            self.center_top.y,
+            self.center_top.width,
+            self.center_top
+                .height
+                .saturating_add(self.center_bottom.height),
+        )
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkspaceLayout {
+    pub sidebar_visible: bool,
+    pub sidebar_width: u16,
+    pub sidebar_min: u16,
+    pub sidebar_max_pct: f32,
+    pub center_split_ratio: f32,
+    pub terminal_size: (u16, u16),
+    pub tab_bar_height: u16,
+    pub status_bar_height: u16,
+}
+
+impl Default for WorkspaceLayout {
+    fn default() -> Self {
+        Self {
+            sidebar_visible: true,
+            sidebar_width: 30,
+            sidebar_min: 20,
+            sidebar_max_pct: 0.5,
+            center_split_ratio: 0.55,
+            terminal_size: (80, 24),
+            tab_bar_height: 1,
+            status_bar_height: 1,
+        }
+    }
+}
+
+impl WorkspaceLayout {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn update_terminal_size(&mut self, width: u16, height: u16) {
+        self.terminal_size = (width, height);
+    }
+
+    pub fn terminal_size(&self) -> (u16, u16) {
+        self.terminal_size
+    }
+
+    pub fn toggle_sidebar(&mut self) {
+        self.sidebar_visible = !self.sidebar_visible;
+    }
+
+    pub fn sidebar_visible(&self) -> bool {
+        let (width, _) = self.terminal_size;
+        // Auto-hide if terminal too small
+        if width < 80 {
+            false
+        } else {
+            self.sidebar_visible
+        }
+    }
+
+    pub fn sidebar_icon_only(&self) -> bool {
+        let (width, _) = self.terminal_size;
+        width < 100 && width >= 80
+    }
+
+    pub fn resize_sidebar(&mut self, delta: i16) {
+        let (width, _) = self.terminal_size;
+        let max_sidebar = (width as f32 * self.sidebar_max_pct) as u16;
+        let new_width = (self.sidebar_width as i16 + delta)
+            .max(self.sidebar_min as i16)
+            .min(max_sidebar as i16) as u16;
+        self.sidebar_width = new_width;
+    }
+
+    pub fn resize_center_split(&mut self, delta: f32) {
+        let new_ratio = self.center_split_ratio + delta;
+        self.center_split_ratio = new_ratio.clamp(0.2, 0.8);
+    }
+
+    pub fn calculate(&self) -> WorkspaceRects {
+        let (term_width, term_height) = self.terminal_size;
+
+        // Minimal fallback for very small terminals
+        if term_width < 60 {
+            let status_bar_area = Rect::new(
+                0,
+                term_height.saturating_sub(self.status_bar_height),
+                term_width,
+                self.status_bar_height,
+            );
+            let main_height = term_height.saturating_sub(self.status_bar_height).max(1);
+            return WorkspaceRects {
+                sidebar: Rect::new(0, 0, 0, 0),
+                center_top: Rect::new(0, 0, term_width, main_height),
+                center_bottom: Rect::new(0, 0, 0, 0),
+                status_bar: status_bar_area,
+                tab_bar: Rect::new(0, 0, 0, 0),
+            };
+        }
+
+        let sidebar_visible = self.sidebar_visible();
+        let icon_only = self.sidebar_icon_only();
+
+        let status_bar_area = Rect::new(
+            0,
+            term_height.saturating_sub(self.status_bar_height),
+            term_width,
+            self.status_bar_height,
+        );
+        let main_height = term_height.saturating_sub(self.status_bar_height);
+
+        let sidebar_width = if sidebar_visible {
+            if icon_only {
+                self.sidebar_min.min(6).max(3)
+            } else {
+                self.sidebar_width
+                    .min(term_width.saturating_sub(self.sidebar_min))
+            }
+        } else {
+            0
+        };
+
+        let sidebar_area = Rect::new(0, 0, sidebar_width, main_height);
+        let center_x = sidebar_width;
+        let center_width = term_width.saturating_sub(sidebar_width);
+
+        let center_top_height = ((main_height as f32) * self.center_split_ratio) as u16;
+        let center_top_height = center_top_height.max(5).min(main_height.saturating_sub(5));
+        let center_bottom_height = main_height.saturating_sub(center_top_height);
+
+        let tab_bar_height = self.tab_bar_height.min(center_top_height);
+        let center_top_content_y = tab_bar_height;
+
+        let tab_bar_area = Rect::new(center_x, 0, center_width, tab_bar_height);
+        let center_top_content = Rect::new(
+            center_x,
+            center_top_content_y,
+            center_width,
+            center_top_height.saturating_sub(tab_bar_height),
+        );
+        let center_bottom_area = Rect::new(
+            center_x,
+            center_top_height,
+            center_width,
+            center_bottom_height,
+        );
+
+        WorkspaceRects {
+            sidebar: sidebar_area,
+            center_top: center_top_content,
+            center_bottom: center_bottom_area,
+            status_bar: status_bar_area,
+            tab_bar: tab_bar_area,
+        }
+    }
+
+    pub fn validate(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        let (width, height) = self.terminal_size;
+        if width < 60 {
+            errors.push("Terminal too small (min 60 cols)".to_string());
+        }
+        if height < 20 {
+            errors.push("Terminal too short (min 20 rows)".to_string());
+        }
+        errors
     }
 }
 

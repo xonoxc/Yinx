@@ -137,32 +137,28 @@ impl ResponsePane {
         };
 
         match self.view_mode {
-            ResponseViewMode::Pretty => {
-                match &response.body {
-                    ResponseBody::Json(_) => {
-                        let pretty = response.body.pretty_json().unwrap_or_default();
-                        for line in pretty.lines() {
-                            self.lines_cache.push(line.to_string());
-                        }
-                    }
-                    ResponseBody::Text(t) => {
-                        for line in t.lines() {
-                            self.lines_cache.push(line.to_string());
-                        }
-                    }
-                    ResponseBody::Binary(b) => {
-                        self.lines_cache
-                            .push(format!("<binary {} bytes>", b.len()));
-                    }
-                    ResponseBody::Stream(b) => {
-                        self.lines_cache
-                            .push(format!("<stream {} bytes>", b.len()));
-                    }
-                    ResponseBody::None => {
-                        self.lines_cache.push("(empty body)".to_string());
+            ResponseViewMode::Pretty => match &response.body {
+                ResponseBody::Json(_) => {
+                    let pretty = response.body.pretty_json().unwrap_or_default();
+                    for line in pretty.lines() {
+                        self.lines_cache.push(line.to_string());
                     }
                 }
-            }
+                ResponseBody::Text(t) => {
+                    for line in t.lines() {
+                        self.lines_cache.push(line.to_string());
+                    }
+                }
+                ResponseBody::Binary(b) => {
+                    self.lines_cache.push(format!("<binary {} bytes>", b.len()));
+                }
+                ResponseBody::Stream(b) => {
+                    self.lines_cache.push(format!("<stream {} bytes>", b.len()));
+                }
+                ResponseBody::None => {
+                    self.lines_cache.push("(empty body)".to_string());
+                }
+            },
             ResponseViewMode::Raw => {
                 let text = match &response.body {
                     ResponseBody::Json(v) => serde_json::to_string(v).unwrap_or_default(),
@@ -246,14 +242,11 @@ impl ResponsePane {
                 true
             }
             KeyCode::PageUp => {
-                self.scroll_offset =
-                    self.scroll_offset.saturating_sub(self.max_visible_lines);
+                self.scroll_offset = self.scroll_offset.saturating_sub(self.max_visible_lines);
                 true
             }
             KeyCode::Home | KeyCode::Char('g') => {
-                if key_code == KeyCode::Char('g')
-                    && self.scroll_offset > 0
-                {
+                if key_code == KeyCode::Char('g') && self.scroll_offset > 0 {
                     self.scroll_offset = 0;
                     true
                 } else {
@@ -281,8 +274,7 @@ impl ResponsePane {
             }
             KeyCode::Char('n') => {
                 if !self.search_matches.is_empty() {
-                    self.search_selected =
-                        (self.search_selected + 1) % self.search_matches.len();
+                    self.search_selected = (self.search_selected + 1) % self.search_matches.len();
                     self.scroll_to_match();
                 }
                 true
@@ -350,14 +342,12 @@ impl ResponsePane {
         let inner_height = inner.height as usize;
 
         if self.lines_cache.is_empty() && !self.has_content() {
-            let placeholder = Paragraph::new(Line::from(vec![
-                Span::styled(
-                    "No response yet.",
-                    Style::default()
-                        .fg(theme.title_color(is_active))
-                        .add_modifier(Modifier::BOLD),
-                ),
-            ]))
+            let placeholder = Paragraph::new(Line::from(vec![Span::styled(
+                "No response yet.",
+                Style::default()
+                    .fg(theme.title_color(is_active))
+                    .add_modifier(Modifier::BOLD),
+            )]))
             .style(Style::default().fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: false });
             frame.render_widget(placeholder, inner);
@@ -367,9 +357,7 @@ impl ResponsePane {
         let total_lines = self.lines_cache.len();
         let viewport = inner_height.saturating_sub(1);
         self.max_visible_lines = viewport.max(1);
-        let scroll = self
-            .scroll_offset
-            .min(total_lines.saturating_sub(viewport));
+        let scroll = self.scroll_offset.min(total_lines.saturating_sub(viewport));
 
         let visible_lines: Vec<Line> = self
             .lines_cache
@@ -380,11 +368,8 @@ impl ResponsePane {
             .map(|(i, line)| {
                 let global_idx = scroll + i;
                 let is_match = self.search_match_set.contains(&global_idx);
-                let is_selected = is_match
-                    && self
-                        .search_matches
-                        .get(self.search_selected)
-                        == Some(&global_idx);
+                let is_selected =
+                    is_match && self.search_matches.get(self.search_selected) == Some(&global_idx);
 
                 if is_selected {
                     Line::from(Span::styled(
@@ -461,8 +446,7 @@ impl ResponsePane {
             inner.height,
         );
 
-        let thumb_height = ((viewport as f64 / total as f64) * inner.height as f64)
-            .max(1.0) as u16;
+        let thumb_height = ((viewport as f64 / total as f64) * inner.height as f64).max(1.0) as u16;
         let thumb_pos = if total > viewport {
             ((scroll as f64 / (total - viewport) as f64) * (inner.height - thumb_height) as f64)
                 as u16
@@ -485,8 +469,7 @@ impl ResponsePane {
             scrollbar_chars.push(Line::from(Span::styled(ch, style)));
         }
 
-        let scrollbar = Paragraph::new(scrollbar_chars)
-            .style(Style::default());
+        let scrollbar = Paragraph::new(scrollbar_chars).style(Style::default());
         frame.render_widget(scrollbar, scrollbar_area);
     }
 
@@ -699,7 +682,9 @@ mod tests {
         let mut pane = ResponsePane::new();
         let response = Response::builder()
             .status(200)
-            .body(ResponseBody::Text("hello world\nfoo bar\nhello again".to_string()))
+            .body(ResponseBody::Text(
+                "hello world\nfoo bar\nhello again".to_string(),
+            ))
             .build();
         pane.set_response(response);
         pane.handle_key(KeyCode::Char('/'));
@@ -744,10 +729,7 @@ mod tests {
     #[test]
     fn test_json_highlighting() {
         let pane = ResponsePane::new();
-        let line = pane.syntax_highlight_line(
-            r#"  "key": "value","#,
-            &Theme::dark(),
-        );
+        let line = pane.syntax_highlight_line(r#"  "key": "value","#, &Theme::dark());
         assert!(!line.spans.is_empty());
     }
 

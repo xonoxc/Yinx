@@ -155,6 +155,7 @@ pub enum ActivePane {
     Response,
     Workflow,
     Logs,
+    Sidebar,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]

@@ -354,22 +354,10 @@ impl KeyBindingConfig {
 
         // Ctrl+w chord actions
         bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::ChordPaneNext);
-        bindings.insert(
-            KeyBinding::new("h", &["Ctrl"]),
-            KeyAction::ChordPaneLeft,
-        );
-        bindings.insert(
-            KeyBinding::new("j", &["Ctrl"]),
-            KeyAction::ChordPaneDown,
-        );
-        bindings.insert(
-            KeyBinding::new("k", &["Ctrl"]),
-            KeyAction::ChordPaneUp,
-        );
-        bindings.insert(
-            KeyBinding::new("l", &["Ctrl"]),
-            KeyAction::ChordPaneRight,
-        );
+        bindings.insert(KeyBinding::new("h", &["Ctrl"]), KeyAction::ChordPaneLeft);
+        bindings.insert(KeyBinding::new("j", &["Ctrl"]), KeyAction::ChordPaneDown);
+        bindings.insert(KeyBinding::new("k", &["Ctrl"]), KeyAction::ChordPaneUp);
+        bindings.insert(KeyBinding::new("l", &["Ctrl"]), KeyAction::ChordPaneRight);
 
         Self { bindings }
     }
@@ -521,7 +509,10 @@ impl InputHandler {
             KeyAction::InsertAtEnd => {
                 self.mode = InputMode::Insert;
                 events.push(AppEvent::ModeChanged(InputMode::Insert));
-                events.push(AppEvent::CursorMoved { lines: 0, cols: i64::MAX });
+                events.push(AppEvent::CursorMoved {
+                    lines: 0,
+                    cols: i64::MAX,
+                });
             }
             KeyAction::ModeNormal => {}
             KeyAction::ModeCommand => {
@@ -617,9 +608,7 @@ impl InputHandler {
                 });
             }
             KeyAction::CloseTab => {
-                events.push(AppEvent::TabClosed {
-                    id: String::new(),
-                });
+                events.push(AppEvent::TabClosed { id: String::new() });
             }
             KeyAction::ToggleSidebar => {
                 // App-level event, handled in TuiShell
@@ -661,18 +650,20 @@ impl InputHandler {
                 events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs));
             }
             KeyAction::ChordPaneUp => {
-                events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Response));
+                events.push(AppEvent::PaneChanged(
+                    yinx_core::state::ActivePane::Response,
+                ));
             }
             KeyAction::ChordPaneRight => {
-                events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Response));
+                events.push(AppEvent::PaneChanged(
+                    yinx_core::state::ActivePane::Response,
+                ));
             }
             KeyAction::ChordPaneNext => {
                 events.push(AppEvent::CyclePaneNext);
             }
             KeyAction::ChordPaneClose => {
-                events.push(AppEvent::TabClosed {
-                    id: String::new(),
-                });
+                events.push(AppEvent::TabClosed { id: String::new() });
             }
             KeyAction::ChordPaneOther => {
                 // maximize/minimize pane - app-level

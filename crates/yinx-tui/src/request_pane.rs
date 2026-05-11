@@ -138,6 +138,7 @@ struct SerializableHeader {
 pub struct RequestPane {
     method: Method,
     url_buffer: InputBuffer,
+    url_scroll_offset: usize,
     selected_tab: usize,
     headers: Vec<(InputBuffer, InputBuffer)>,
     header_selected: usize,
@@ -162,6 +163,7 @@ pub struct RequestPane {
     url_autocomplete_visible: bool,
     url_autocomplete_selected: usize,
     search_visible: bool,
+    compact: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +196,7 @@ impl RequestPane {
         Self {
             method: Method::Get,
             url_buffer: InputBuffer::new(),
+            url_scroll_offset: 0,
             selected_tab: 0,
             headers: vec![(InputBuffer::new(), InputBuffer::new())],
             header_selected: 0,
@@ -218,6 +221,7 @@ impl RequestPane {
             url_autocomplete_visible: false,
             url_autocomplete_selected: 0,
             search_visible: false,
+            compact: false,
         }
     }
 
@@ -381,6 +385,40 @@ impl RequestPane {
             .body(body)
             .timeout_secs(timeout_secs)
             .build()
+    }
+
+    pub fn set_compact(&mut self, compact: bool) {
+        self.compact = compact;
+    }
+
+    pub fn is_compact(&self) -> bool {
+        self.compact
+    }
+
+    pub fn url_scroll_offset(&self) -> usize {
+        self.url_scroll_offset
+    }
+
+    pub fn update_url_scroll(&mut self, viewport_width: usize) {
+        let cursor = self.url_buffer.cursor_pos;
+        let url_len = self.url_buffer.len();
+
+        if cursor < self.url_scroll_offset {
+            self.url_scroll_offset = cursor;
+        } else {
+            let right_edge = self.url_scroll_offset + viewport_width;
+            if cursor > right_edge && viewport_width > 0 {
+                self.url_scroll_offset = cursor.saturating_sub(viewport_width.saturating_sub(5));
+            }
+        }
+
+        if url_len <= viewport_width {
+            self.url_scroll_offset = 0;
+        }
+
+        self.url_scroll_offset = self
+            .url_scroll_offset
+            .min(url_len.saturating_sub(viewport_width));
     }
 
     pub fn set_focused_field(&mut self, field: FocusedField) {
@@ -1221,13 +1259,296 @@ impl RequestPane {
             .ok_or_else(|| EditorError::Validation(format!("Param index {index} is out of bounds")))
     }
 
+    pub fn render_compact(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        is_active: bool,
+    ) {
+        if area.width < 10 || area.height < 3 {
+            return;
+        }
+
+        let inner = area;
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![Constraint::Length(1), Constraint::Min(0)])
+            .split(inner);
+
+        self.render_compact_method_url(frame, chunks[0], theme, is_active);
+        self.render_compact_tab_content(frame, chunks[1], theme, is_active);
+
+        if self.method_popup_visible {
+            self.render_method_popup(frame, area, theme);
+        }
+    }
+
+    fn render_compact_method_url(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        is_active: bool,
+    ) {
+        let url_focused = is_active && self.focused_field == FocusedField::Url;
+
+        let method_color = self.method_theme_color(theme);
+        let method_text = Span::styled(
+            format!(" {} ", self.method.as_str()),
+            Style::default()
+                .fg(theme.pane.status_bar_bg.as_color())
+                .bg(method_color)
+                .add_modifier(Modifier::BOLD),
+        );
+
+        let url_text = if url_focused {
+            self.url_buffer.as_str().to_string()
+        } else {
+            let url = self.url_buffer.as_str();
+            let max_len = area.width.saturating_sub(12) as usize;
+            if url.len() > max_len && max_len > 10 {
+                let half = max_len.saturating_sub(3) / 2;
+                format!(
+                    "{}…{}",
+                    &url[..half],
+                    &url[url.len().saturating_sub(half)..]
+                )
+            } else {
+                url.to_string()
+            }
+        };
+
+        let url_style = Style::default().fg(theme.foreground.as_color());
+        let url_span = Span::styled(url_text, url_style);
+
+        let line = Line::from(vec![method_text, Span::raw(" "), url_span]);
+        let paragraph = Paragraph::new(line).style(Style::default().bg(theme.pane_bg(is_active)));
+        frame.render_widget(paragraph, area);
+
+        if url_focused {
+            let mut cursor_x = 5u16;
+            let url_prefix = &self.url_buffer.as_str()[..self.url_buffer.cursor_pos];
+            cursor_x = cursor_x.saturating_add(url_prefix.chars().count() as u16);
+            frame.set_cursor_position(ratatui::prelude::Position::new(
+                area.x + cursor_x.min(area.width.saturating_sub(1)),
+                area.y,
+            ));
+        }
+    }
+
+    fn method_theme_color(&self, theme: &Theme) -> ratatui::style::Color {
+        match self.method {
+            yinx_core::request::Method::Get => theme.semantic.success.as_color(),
+            yinx_core::request::Method::Post => theme.semantic.info.as_color(),
+            yinx_core::request::Method::Put => theme.semantic.warning.as_color(),
+            yinx_core::request::Method::Patch => theme.semantic.warning.as_color(),
+            yinx_core::request::Method::Delete => theme.semantic.error.as_color(),
+            yinx_core::request::Method::Head => theme.semantic.info.as_color(),
+            yinx_core::request::Method::Options => ratatui::style::Color::Magenta,
+        }
+    }
+
+    fn render_compact_tab_content(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        is_active: bool,
+    ) {
+        if area.height < 3 {
+            return;
+        }
+
+        let tab_height = 1;
+        let content_height = area.height.saturating_sub(tab_height);
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(vec![Constraint::Length(tab_height), Constraint::Min(0)])
+            .split(area);
+
+        self.render_compact_tabs(frame, chunks[0], theme, is_active);
+
+        if content_height > 0 {
+            self.render_compact_selected_tab(frame, chunks[1], theme, is_active);
+        }
+    }
+
+    fn render_compact_tabs(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let mut spans: Vec<Span> = Vec::new();
+        let titles = self.tab_titles();
+
+        for (i, title) in titles.iter().enumerate() {
+            if i > 0 {
+                spans.push(Span::raw(" │ "));
+            }
+            if i == self.selected_tab {
+                spans.push(Span::styled(
+                    title.clone(),
+                    Style::default()
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .add_modifier(Modifier::BOLD),
+                ));
+            } else {
+                spans.push(Span::styled(
+                    title.clone(),
+                    Style::default().fg(theme.title_color(false)),
+                ));
+            }
+        }
+
+        let line = Line::from(spans);
+        let paragraph = Paragraph::new(line).style(Style::default().bg(theme.pane_bg(is_active)));
+        frame.render_widget(paragraph, area);
+    }
+
+    fn render_compact_selected_tab(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        is_active: bool,
+    ) {
+        let tab = RequestTab::all()[self.selected_tab];
+        match tab {
+            RequestTab::Headers => self.render_compact_headers(frame, area, theme, is_active),
+            RequestTab::Body => self.render_compact_body(frame, area, theme, is_active),
+            RequestTab::Auth => self.render_auth_tab(frame, area, theme, is_active),
+            RequestTab::Params => self.render_compact_params(frame, area, theme, is_active),
+        }
+    }
+
+    fn render_compact_headers(
+        &self,
+        frame: &mut Frame,
+        area: Rect,
+        theme: &Theme,
+        is_active: bool,
+    ) {
+        let rows: Vec<Row> = self
+            .headers
+            .iter()
+            .enumerate()
+            .map(|(i, (name, value))| {
+                let is_selected = is_active
+                    && self.focused_field == FocusedField::TabContent
+                    && self.header_selected == i;
+                let style = if is_selected {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                Row::new(vec![
+                    Cell::from(name.as_str().to_string()).style(style),
+                    Cell::from(value.as_str().to_string()).style(style),
+                ])
+                .style(style)
+            })
+            .collect();
+
+        let table = Table::new(
+            rows,
+            &[Constraint::Percentage(40), Constraint::Percentage(60)],
+        )
+        .block(
+            Block::default().style(
+                Style::default()
+                    .bg(theme.pane_bg(is_active))
+                    .fg(theme.foreground.as_color()),
+            ),
+        );
+
+        let mut state = ratatui::widgets::TableState::default();
+        if is_active && self.focused_field == FocusedField::TabContent {
+            state.select(Some(self.header_selected));
+        }
+
+        frame.render_stateful_widget(table, area, &mut state);
+    }
+
+    fn render_compact_body(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let body_para = Paragraph::new(self.body_content.as_str())
+            .style(
+                Style::default()
+                    .fg(theme.foreground.as_color())
+                    .bg(theme.pane_bg(is_active)),
+            )
+            .wrap(Wrap { trim: false });
+        frame.render_widget(body_para, area);
+
+        if is_active && self.focused_field == FocusedField::TabContent {
+            let x_offset = self.body_content.as_str()[..self.body_content.cursor_pos]
+                .chars()
+                .count() as u16;
+            frame.set_cursor_position(ratatui::prelude::Position::new(
+                area.x + x_offset.min(area.width.saturating_sub(1)),
+                area.y,
+            ));
+        }
+    }
+
+    fn render_compact_params(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
+        let rows: Vec<Row> = self
+            .params
+            .iter()
+            .enumerate()
+            .map(|(i, (key, value))| {
+                let is_selected = is_active
+                    && self.focused_field == FocusedField::TabContent
+                    && self.param_selected == i;
+                let style = if is_selected {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                } else {
+                    Style::default().fg(theme.foreground.as_color())
+                };
+
+                Row::new(vec![
+                    Cell::from(key.as_str().to_string()).style(style),
+                    Cell::from(value.as_str().to_string()).style(style),
+                ])
+                .style(style)
+            })
+            .collect();
+
+        let table = Table::new(
+            rows,
+            &[Constraint::Percentage(40), Constraint::Percentage(60)],
+        )
+        .block(
+            Block::default().style(
+                Style::default()
+                    .bg(theme.pane_bg(is_active))
+                    .fg(theme.foreground.as_color()),
+            ),
+        );
+
+        let mut state = ratatui::widgets::TableState::default();
+        if is_active && self.focused_field == FocusedField::TabContent {
+            state.select(Some(self.param_selected));
+        }
+
+        frame.render_stateful_widget(table, area, &mut state);
+    }
+
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
         let block = Block::default()
             .title("REQUEST CONFIG")
             .borders(Borders::ALL)
             .border_type(BorderType::Plain)
             .border_style(Style::default().fg(theme.border_color(is_active)))
-            .style(Style::default().bg(theme.pane_bg(is_active)).fg(theme.foreground.as_color()));
+            .style(
+                Style::default()
+                    .bg(theme.pane_bg(is_active))
+                    .fg(theme.foreground.as_color()),
+            );
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -1298,7 +1619,11 @@ impl RequestPane {
             } else {
                 Style::default().fg(theme.border.color.as_color())
             })
-            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+            .style(
+                Style::default()
+                    .bg(theme.highlight.bg.as_color())
+                    .fg(theme.highlight.fg.as_color()),
+            )
             .title(" URL ");
 
         let url_para = Paragraph::new(self.url_buffer.as_str())
@@ -1331,7 +1656,11 @@ impl RequestPane {
                     theme.border.color.as_color()
                 },
             )))
-            .style(Style::default().bg(theme.subtle_bg()).fg(theme.foreground.as_color()))
+            .style(
+                Style::default()
+                    .bg(theme.subtle_bg())
+                    .fg(theme.foreground.as_color()),
+            )
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
@@ -1410,7 +1739,11 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane_bg(is_active)).fg(theme.foreground.as_color()))
+                .style(
+                    Style::default()
+                        .bg(theme.pane_bg(is_active))
+                        .fg(theme.foreground.as_color()),
+                )
                 .title(" HEADERS  a add  d delete "),
         )
         .row_highlight_style(
@@ -1471,7 +1804,11 @@ impl RequestPane {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+                    .style(
+                        Style::default()
+                            .bg(theme.highlight.bg.as_color())
+                            .fg(theme.highlight.fg.as_color()),
+                    )
                     .title(" BODY "),
             )
             .style(content_style)
@@ -1521,7 +1858,11 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()))
+                .style(
+                    Style::default()
+                        .bg(theme.pane.bg_color())
+                        .fg(theme.foreground.as_color()),
+                )
                 .title("Authentication"),
         );
 
@@ -1534,7 +1875,11 @@ impl RequestPane {
                         Block::default()
                             .borders(Borders::ALL)
                             .border_style(Style::default().fg(theme.border.color.as_color()))
-                            .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
+                            .style(
+                                Style::default()
+                                    .bg(theme.pane.bg_color())
+                                    .fg(theme.foreground.as_color()),
+                            ),
                     )
                     .style(Style::default().fg(theme.foreground.as_color()));
                 frame.render_widget(para, chunks[1]);
@@ -1572,7 +1917,11 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+                            .style(
+                                Style::default()
+                                    .bg(theme.highlight.bg.as_color())
+                                    .fg(theme.highlight.fg.as_color()),
+                            )
                             .title("Username"),
                     )
                     .style(user_style);
@@ -1590,7 +1939,11 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+                            .style(
+                                Style::default()
+                                    .bg(theme.highlight.bg.as_color())
+                                    .fg(theme.highlight.fg.as_color()),
+                            )
                             .title("Password"),
                     )
                     .style(pass_style);
@@ -1635,7 +1988,11 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+                            .style(
+                                Style::default()
+                                    .bg(theme.highlight.bg.as_color())
+                                    .fg(theme.highlight.fg.as_color()),
+                            )
                             .title("Bearer Token"),
                     )
                     .style(token_style);
@@ -1685,7 +2042,11 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+                            .style(
+                                Style::default()
+                                    .bg(theme.highlight.bg.as_color())
+                                    .fg(theme.highlight.fg.as_color()),
+                            )
                             .title("Key Name"),
                     )
                     .style(key_style);
@@ -1703,7 +2064,11 @@ impl RequestPane {
                                     Style::default().fg(theme.border.color.as_color())
                                 },
                             )
-                            .style(Style::default().bg(theme.highlight.bg.as_color()).fg(theme.highlight.fg.as_color()))
+                            .style(
+                                Style::default()
+                                    .bg(theme.highlight.bg.as_color())
+                                    .fg(theme.highlight.fg.as_color()),
+                            )
                             .title("Key Value"),
                     )
                     .style(value_style);
@@ -1789,7 +2154,11 @@ impl RequestPane {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()))
+                .style(
+                    Style::default()
+                        .bg(theme.pane.bg_color())
+                        .fg(theme.foreground.as_color()),
+                )
                 .title("Query Parameters (a=add, d=delete, ←→ to switch field)"),
         )
         .row_highlight_style(
@@ -1821,7 +2190,11 @@ impl RequestPane {
                     .borders(Borders::ALL)
                     .border_type(BorderType::Rounded)
                     .border_style(Style::default().fg(theme.border.active_color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
+                    .style(
+                        Style::default()
+                            .bg(theme.pane.bg_color())
+                            .fg(theme.foreground.as_color()),
+                    ),
             )
             .highlight_style(
                 Style::default()
@@ -1872,11 +2245,15 @@ impl RequestPane {
         let list = List::new(items)
             .style(Style::default().fg(theme.foreground.as_color()))
             .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.active_color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
-        );
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(theme.border.active_color.as_color()))
+                    .style(
+                        Style::default()
+                            .bg(theme.pane.bg_color())
+                            .fg(theme.foreground.as_color()),
+                    ),
+            );
 
         frame.render_widget(list, popup_area);
     }

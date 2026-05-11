@@ -285,7 +285,11 @@ impl SettingsPane {
             .title("SETTINGS")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.border.active_color.as_color()))
-            .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()));
+            .style(
+                Style::default()
+                    .bg(theme.pane.bg_color())
+                    .fg(theme.foreground.as_color()),
+            );
 
         let inner = block.inner(area);
         f.render_widget(Clear, area);
@@ -349,7 +353,11 @@ impl SettingsPane {
                 .title("EDIT VALUE")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme.border.active_color.as_color()))
-                .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color()));
+                .style(
+                    Style::default()
+                        .bg(theme.pane.bg_color())
+                        .fg(theme.foreground.as_color()),
+                );
 
             let edit_para = Paragraph::new(self.edit_buffer.as_str())
                 .block(edit_block)
@@ -367,11 +375,17 @@ impl SettingsPane {
                 Span::raw(&self.config.theme),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("default_timeout_secs: ", Style::default().fg(theme.muted_color())),
+                Span::styled(
+                    "default_timeout_secs: ",
+                    Style::default().fg(theme.muted_color()),
+                ),
                 Span::raw(self.config.defaults.default_timeout_secs.to_string()),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("follow_redirects: ", Style::default().fg(theme.muted_color())),
+                Span::styled(
+                    "follow_redirects: ",
+                    Style::default().fg(theme.muted_color()),
+                ),
                 Span::raw(self.config.defaults.follow_redirects.to_string()),
             ])),
             ListItem::new(Line::from(vec![
@@ -379,14 +393,20 @@ impl SettingsPane {
                 Span::raw(self.config.defaults.verify_tls.to_string()),
             ])),
             ListItem::new(Line::from(vec![
-                Span::styled("max_history_entries: ", Style::default().fg(theme.muted_color())),
+                Span::styled(
+                    "max_history_entries: ",
+                    Style::default().fg(theme.muted_color()),
+                ),
                 Span::raw(self.config.defaults.max_history_entries.to_string()),
             ])),
         ];
 
         for (key, value) in &self.config.keybindings {
             items.push(ListItem::new(Line::from(vec![
-                Span::styled(format!("{}: ", key), Style::default().fg(theme.muted_color())),
+                Span::styled(
+                    format!("{}: ", key),
+                    Style::default().fg(theme.muted_color()),
+                ),
                 Span::raw(value),
             ])));
         }

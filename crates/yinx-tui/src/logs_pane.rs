@@ -406,7 +406,11 @@ impl LogsPane {
             .borders(Borders::ALL)
             .border_type(BorderType::Plain)
             .border_style(Style::default().fg(theme.border_color(is_active)))
-            .style(Style::default().bg(theme.pane_bg(is_active)).fg(theme.foreground.as_color()));
+            .style(
+                Style::default()
+                    .bg(theme.pane_bg(is_active))
+                    .fg(theme.foreground.as_color()),
+            );
 
         let inner = block.inner(area);
         frame.render_widget(block, area);
@@ -471,7 +475,11 @@ impl LogsPane {
             .block(
                 Block::default().border_style(Style::default().fg(theme.border.color.as_color())),
             )
-            .style(Style::default().bg(theme.subtle_bg()).fg(theme.foreground.as_color()))
+            .style(
+                Style::default()
+                    .bg(theme.subtle_bg())
+                    .fg(theme.foreground.as_color()),
+            )
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
@@ -854,7 +862,11 @@ impl LogsPane {
                         .title("Request Duration Histogram (ms)")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
+                        .style(
+                            Style::default()
+                                .bg(theme.pane.bg_color())
+                                .fg(theme.foreground.as_color()),
+                        ),
                 )
                 .bar_width(8)
                 .bar_gap(1)
@@ -899,7 +911,11 @@ impl LogsPane {
                         .title("Chunk Interval Histogram (ms)")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
+                        .style(
+                            Style::default()
+                                .bg(theme.pane.bg_color())
+                                .fg(theme.foreground.as_color()),
+                        ),
                 )
                 .bar_width(8)
                 .bar_gap(1)
@@ -964,7 +980,11 @@ impl LogsPane {
                         .title("Status Code Distribution")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
+                        .style(
+                            Style::default()
+                                .bg(theme.pane.bg_color())
+                                .fg(theme.foreground.as_color()),
+                        ),
                 )
                 .bar_width(8)
                 .bar_gap(1)
@@ -1073,7 +1093,11 @@ impl LogsPane {
                         .title("Curl Equivalent")
                         .borders(Borders::ALL)
                         .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
+                        .style(
+                            Style::default()
+                                .bg(theme.pane.bg_color())
+                                .fg(theme.foreground.as_color()),
+                        ),
                 )
                 .wrap(Wrap { trim: true });
             frame.render_widget(paragraph, area);
@@ -1087,7 +1111,11 @@ impl LogsPane {
                     .title("Curl Equivalent")
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color()).fg(theme.foreground.as_color())),
+                    .style(
+                        Style::default()
+                            .bg(theme.pane.bg_color())
+                            .fg(theme.foreground.as_color()),
+                    ),
             )
             .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);

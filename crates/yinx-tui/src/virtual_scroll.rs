@@ -1,9 +1,4 @@
-use ratatui::{
-    layout::Rect,
-    style::Style,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
 
 use crate::theme::Theme;
 
