@@ -51,11 +51,18 @@ impl<'a> Panel<'a> {
             Some(BorderType::Rounded) => BorderType::Rounded,
             Some(BorderType::Double) => BorderType::Double,
             Some(BorderType::Thick) => BorderType::Thick,
-            _ => BorderType::Rounded,
+            _ => BorderType::Plain,
         };
 
+        let mut title_prefix = self.title.to_uppercase();
+        if self.is_active {
+            title_prefix = format!(" {} ", title_prefix);
+        } else {
+            title_prefix = format!(" {} ", title_prefix);
+        }
+
         let block = Block::default()
-            .title(self.title.to_uppercase())
+            .title(title_prefix)
             .borders(Borders::ALL)
             .border_type(border_type)
             .border_style(Style::default().fg(theme.border_color(self.is_active)))
@@ -281,7 +288,8 @@ impl<'a> TabsWidget<'a> {
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                    .bg(theme.highlight.selected_bg.as_color())
+                    .add_modifier(Modifier::BOLD),
             );
 
         frame.render_widget(tabs, area);
@@ -292,6 +300,7 @@ pub struct InputField<'a> {
     content: &'a str,
     cursor_pos: usize,
     title: Option<&'a str>,
+    is_focused: bool,
 }
 
 impl<'a> InputField<'a> {
@@ -300,6 +309,7 @@ impl<'a> InputField<'a> {
             content,
             cursor_pos: content.len(),
             title: None,
+            is_focused: false,
         }
     }
 
@@ -313,12 +323,24 @@ impl<'a> InputField<'a> {
         self
     }
 
+    pub fn focused(mut self, is_focused: bool) -> Self {
+        self.is_focused = is_focused;
+        self
+    }
+
     pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        let border_color = if self.is_focused {
+            theme.border.active_color.as_color()
+        } else {
+            theme.border.color.as_color()
+        };
+
         let block = if let Some(title) = self.title {
             Block::default()
                 .title(title)
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .border_type(theme.tui_border_type())
+                .border_style(Style::default().fg(border_color))
                 .style(
                     Style::default()
                         .bg(theme.highlight.bg.as_color())
@@ -327,7 +349,8 @@ impl<'a> InputField<'a> {
         } else {
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .border_type(theme.tui_border_type())
+                .border_style(Style::default().fg(border_color))
                 .style(
                     Style::default()
                         .bg(theme.highlight.bg.as_color())
@@ -447,6 +470,10 @@ impl<'a> StatusBar<'a> {
     }
 
     pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
+        if area.width < 10 || area.height == 0 {
+            return;
+        }
+
         let mode_span = Span::styled(
             format!(" {} ", self.mode),
             Style::default()
@@ -467,7 +494,7 @@ impl<'a> StatusBar<'a> {
             .iter()
             .flat_map(|(key, desc)| {
                 vec![
-                    Span::styled(*key, Style::default().fg(theme.semantic.warning.as_color())),
+                    Span::styled(*key, Style::default().fg(theme.muted_color())),
                     Span::raw(" "),
                     Span::styled(*desc, Style::default().fg(theme.foreground.as_color())),
                     Span::raw("  "),
@@ -475,25 +502,25 @@ impl<'a> StatusBar<'a> {
             })
             .collect();
 
-        let mut line = vec![mode_span, Span::raw(" "), network_span];
+        let mut line = vec![Span::raw(" "), mode_span, Span::raw("  "), network_span];
 
         if !self.center.is_empty() {
             line.push(Span::styled(
-                format!("• {} ", self.center),
-                Style::default().fg(theme.title_color(false)),
+                format!(" {}  ", self.center),
+                Style::default().fg(theme.title_color(true)),
             ));
         }
 
         if !self.right.is_empty() {
             line.push(Span::styled(
-                format!("• {} ", self.right),
+                format!(" {}  ", self.right),
                 Style::default().fg(theme.foreground.as_color()),
             ));
         }
 
         line.push(Span::styled(
             format!(
-                "• Ln {}, Col {}  ",
+                "Ln {}, Col {}  ",
                 self.cursor_line + 1,
                 self.cursor_col + 1
             ),
@@ -501,15 +528,23 @@ impl<'a> StatusBar<'a> {
         ));
         line.extend(hint_spans);
 
-        let paragraph = Paragraph::new(Line::from(line))
-            .style(
-                Style::default()
-                    .bg(theme.pane.status_bar_bg.as_color())
-                    .fg(theme.pane.status_bar_fg.as_color()),
-            )
-            .alignment(Alignment::Left);
+        let border_color = theme.border.color.as_color();
+        let bg_color = theme.pane.status_bar_bg.as_color();
+        let fg_color = theme.pane.status_bar_fg.as_color();
 
-        frame.render_widget(paragraph, area);
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(theme.tui_border_type())
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(bg_color).fg(fg_color));
+
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+
+        let paragraph = Paragraph::new(Line::from(line))
+            .style(Style::default().bg(bg_color).fg(fg_color))
+            .alignment(Alignment::Left);
+        frame.render_widget(paragraph, inner);
     }
 }
 
@@ -715,7 +750,7 @@ impl<'a> Modal<'a> {
         let block = Block::default()
             .title(self.title)
             .borders(Borders::ALL)
-            .border_type(BorderType::Rounded)
+            .border_type(theme.tui_border_type())
             .border_style(Style::default().fg(theme.border.active_color.as_color()))
             .style(
                 Style::default()

@@ -108,7 +108,10 @@ impl Collection {
     }
 
     pub fn flatten_requests(&self) -> Vec<&SavedRequest> {
-        self.items.iter().flat_map(|i| i.collect_requests()).collect()
+        self.items
+            .iter()
+            .flat_map(|i| i.collect_requests())
+            .collect()
     }
 }
 
@@ -178,7 +181,9 @@ mod tests {
     #[test]
     fn test_collection_summary() {
         let mut c = Collection::new("Test".to_string());
-        c.add_item(CollectionItem::Request(Box::new(make_request("GET /users"))));
+        c.add_item(CollectionItem::Request(Box::new(make_request(
+            "GET /users",
+        ))));
         let summary = c.summary();
         assert_eq!(summary.name, "Test");
         assert_eq!(summary.item_count, 1);
@@ -267,7 +272,9 @@ mod tests {
     #[test]
     fn test_collection_serde_roundtrip() {
         let mut c = Collection::new("Test".to_string());
-        c.add_item(CollectionItem::Request(Box::new(make_request("GET /users"))));
+        c.add_item(CollectionItem::Request(Box::new(make_request(
+            "GET /users",
+        ))));
         let json = serde_json::to_string(&c).unwrap();
         let decoded: Collection = serde_json::from_str(&json).unwrap();
         assert_eq!(decoded.name, c.name);
@@ -279,14 +286,18 @@ mod tests {
         let mut c = Collection::new("Test".to_string());
         let before = c.modified;
         std::thread::sleep(std::time::Duration::from_millis(2));
-        c.add_item(CollectionItem::Request(Box::new(make_request("GET /users"))));
+        c.add_item(CollectionItem::Request(Box::new(make_request(
+            "GET /users",
+        ))));
         assert!(c.modified > before);
     }
 
     #[test]
     fn test_collection_modified_on_remove() {
         let mut c = Collection::new("Test".to_string());
-        c.add_item(CollectionItem::Request(Box::new(make_request("GET /users"))));
+        c.add_item(CollectionItem::Request(Box::new(make_request(
+            "GET /users",
+        ))));
         let before = c.modified;
         std::thread::sleep(std::time::Duration::from_millis(2));
         c.remove_item(0);

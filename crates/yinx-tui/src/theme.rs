@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use ratatui::style::Color;
+use ratatui::{style::Color, widgets::BorderType as TuiBorderType};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
@@ -214,32 +214,32 @@ impl Theme {
             foreground: ColorDef::Reset,
             border: BorderStyle {
                 color: ColorDef::Indexed(8),
-                active_color: ColorDef::Indexed(14),
-                style: BorderType::Plain,
+                active_color: ColorDef::Indexed(12),
+                style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
-                bg: ColorDef::Indexed(8),
+                bg: ColorDef::Reset,
                 fg: ColorDef::Reset,
-                selected_bg: ColorDef::Indexed(6),
+                selected_bg: ColorDef::Indexed(12),
                 selected_fg: ColorDef::Indexed(15),
             },
             semantic: SemanticColors {
                 success: ColorDef::Indexed(2),
                 error: ColorDef::Indexed(1),
                 warning: ColorDef::Indexed(3),
-                info: ColorDef::Indexed(6),
+                info: ColorDef::Indexed(12),
             },
             pane: PaneColors {
                 background: None,
                 active_background: None,
                 inactive_background: None,
                 subtle_background: None,
-                title: ColorDef::Indexed(14),
-                inactive_title: ColorDef::Reset,
-                muted: ColorDef::Reset,
-                placeholder: ColorDef::Reset,
+                title: ColorDef::Indexed(12),
+                inactive_title: ColorDef::Indexed(8),
+                muted: ColorDef::Indexed(8),
+                placeholder: ColorDef::Indexed(8),
                 status_bar_bg: ColorDef::Reset,
-                status_bar_fg: ColorDef::Reset,
+                status_bar_fg: ColorDef::Indexed(15),
             },
         }
     }
@@ -250,9 +250,9 @@ impl Theme {
             background: Some(ColorDef::Rgb(13, 16, 22)),
             foreground: ColorDef::Rgb(214, 220, 228),
             border: BorderStyle {
-                color: ColorDef::Rgb(60, 71, 87),
-                active_color: ColorDef::Rgb(128, 175, 255),
-                style: BorderType::Plain,
+                color: ColorDef::Rgb(67, 79, 97),
+                active_color: ColorDef::Rgb(138, 188, 255),
+                style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Rgb(24, 31, 42),
@@ -262,9 +262,9 @@ impl Theme {
             },
             semantic: SemanticColors {
                 success: ColorDef::Rgb(104, 187, 129),
-                error: ColorDef::Rgb(220, 107, 107),
-                warning: ColorDef::Rgb(226, 187, 96),
-                info: ColorDef::Rgb(115, 176, 227),
+                error: ColorDef::Rgb(235, 120, 120),
+                warning: ColorDef::Rgb(232, 196, 106),
+                info: ColorDef::Rgb(125, 185, 235),
             },
             pane: PaneColors {
                 background: Some(ColorDef::Rgb(16, 20, 28)),
@@ -273,10 +273,47 @@ impl Theme {
                 subtle_background: Some(ColorDef::Rgb(22, 28, 38)),
                 title: ColorDef::Rgb(190, 210, 236),
                 inactive_title: ColorDef::Rgb(106, 119, 138),
-                muted: ColorDef::Rgb(116, 127, 143),
-                placeholder: ColorDef::Rgb(96, 108, 125),
-                status_bar_bg: ColorDef::Rgb(22, 28, 38),
+                muted: ColorDef::Rgb(128, 140, 156),
+                placeholder: ColorDef::Rgb(100, 112, 130),
+                status_bar_bg: ColorDef::Rgb(18, 23, 32),
                 status_bar_fg: ColorDef::Rgb(214, 220, 228),
+            },
+        }
+    }
+
+    pub fn postman() -> Self {
+        Self {
+            name: "postman".to_string(),
+            background: None,
+            foreground: ColorDef::Reset,
+            border: BorderStyle {
+                color: ColorDef::Indexed(8),
+                active_color: ColorDef::Indexed(6),
+                style: BorderType::Rounded,
+            },
+            highlight: HighlightStyle {
+                bg: ColorDef::Reset,
+                fg: ColorDef::Reset,
+                selected_bg: ColorDef::Indexed(6),
+                selected_fg: ColorDef::Indexed(15),
+            },
+            semantic: SemanticColors {
+                success: ColorDef::Indexed(2),
+                error: ColorDef::Indexed(1),
+                warning: ColorDef::Indexed(3),
+                info: ColorDef::Indexed(4),
+            },
+            pane: PaneColors {
+                background: None,
+                active_background: None,
+                inactive_background: None,
+                subtle_background: None,
+                title: ColorDef::Indexed(6),
+                inactive_title: ColorDef::Indexed(8),
+                muted: ColorDef::Indexed(8),
+                placeholder: ColorDef::Indexed(8),
+                status_bar_bg: ColorDef::Reset,
+                status_bar_fg: ColorDef::Reset,
             },
         }
     }
@@ -289,7 +326,7 @@ impl Theme {
             border: BorderStyle {
                 color: ColorDef::Rgb(187, 177, 165),
                 active_color: ColorDef::Rgb(119, 131, 196),
-                style: BorderType::Plain,
+                style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Rgb(237, 231, 223),
@@ -312,7 +349,7 @@ impl Theme {
                 inactive_title: ColorDef::Rgb(143, 132, 121),
                 muted: ColorDef::Rgb(135, 124, 112),
                 placeholder: ColorDef::Rgb(152, 142, 131),
-                status_bar_bg: ColorDef::Rgb(239, 234, 227),
+                status_bar_bg: ColorDef::Rgb(235, 229, 221),
                 status_bar_fg: ColorDef::Rgb(48, 43, 37),
             },
         }
@@ -324,9 +361,9 @@ impl Theme {
             background: Some(ColorDef::Rgb(14, 20, 17)),
             foreground: ColorDef::Rgb(212, 220, 211),
             border: BorderStyle {
-                color: ColorDef::Rgb(67, 84, 73),
-                active_color: ColorDef::Rgb(120, 181, 150),
-                style: BorderType::Plain,
+                color: ColorDef::Rgb(68, 88, 76),
+                active_color: ColorDef::Rgb(130, 196, 160),
+                style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Rgb(24, 36, 30),
@@ -347,9 +384,9 @@ impl Theme {
                 subtle_background: Some(ColorDef::Rgb(22, 32, 27)),
                 title: ColorDef::Rgb(166, 210, 187),
                 inactive_title: ColorDef::Rgb(110, 130, 117),
-                muted: ColorDef::Rgb(117, 134, 123),
-                placeholder: ColorDef::Rgb(95, 114, 102),
-                status_bar_bg: ColorDef::Rgb(22, 32, 27),
+                muted: ColorDef::Rgb(130, 148, 136),
+                placeholder: ColorDef::Rgb(100, 118, 106),
+                status_bar_bg: ColorDef::Rgb(18, 27, 22),
                 status_bar_fg: ColorDef::Rgb(212, 220, 211),
             },
         }
@@ -357,10 +394,11 @@ impl Theme {
 
     pub fn builtin_themes() -> Vec<Self> {
         vec![
-            Self::terminal_default(),
+            Self::postman(),
             Self::dark(),
             Self::light(),
             Self::forest(),
+            Self::terminal_default(),
         ]
     }
 
@@ -385,6 +423,7 @@ impl Theme {
 
     pub fn get_by_name(name: &str) -> Option<Self> {
         match name {
+            "postman" => Some(Self::postman()),
             "terminal" | "terminal_default" => Some(Self::terminal_default()),
             "dark" => Some(Self::dark()),
             "light" => Some(Self::light()),
@@ -423,6 +462,15 @@ impl Theme {
 
     pub fn placeholder_color(&self) -> Color {
         self.pane.placeholder.as_color()
+    }
+
+    pub fn tui_border_type(&self) -> TuiBorderType {
+        match self.border.style {
+            BorderType::Plain => TuiBorderType::Plain,
+            BorderType::Rounded => TuiBorderType::Rounded,
+            BorderType::Double => TuiBorderType::Double,
+            BorderType::Thick => TuiBorderType::Thick,
+        }
     }
 }
 
@@ -476,6 +524,13 @@ mod tests {
     }
 
     #[test]
+    fn test_postman_theme_exists() {
+        let theme = Theme::postman();
+        assert_eq!(theme.name, "postman");
+        assert_eq!(theme.tui_border_type(), TuiBorderType::Rounded);
+    }
+
+    #[test]
     fn test_color_def_as_color_supports_indexed() {
         assert_eq!(ColorDef::Indexed(8).as_color(), Color::Indexed(8));
     }
@@ -508,7 +563,7 @@ mod tests {
 
     #[test]
     fn test_get_by_name_supports_all_builtins() {
-        for name in ["terminal", "dark", "light", "forest"] {
+        for name in ["postman", "terminal", "dark", "light", "forest"] {
             assert!(Theme::get_by_name(name).is_some(), "{name} should resolve");
         }
     }
@@ -518,10 +573,11 @@ mod tests {
         assert_eq!(
             Theme::builtin_theme_names(),
             vec![
-                "terminal".to_string(),
+                "postman".to_string(),
                 "dark".to_string(),
                 "light".to_string(),
                 "forest".to_string(),
+                "terminal".to_string(),
             ]
         );
     }
@@ -549,10 +605,11 @@ mod tests {
         assert_eq!(
             registry.names(),
             vec![
-                "terminal".to_string(),
+                "postman".to_string(),
                 "dark".to_string(),
                 "light".to_string(),
                 "forest".to_string(),
+                "terminal".to_string(),
             ]
         );
     }
@@ -561,7 +618,7 @@ mod tests {
     fn test_theme_registry_cycle_next_rotates_in_order() {
         let mut registry = ThemeRegistry::with_defaults();
         registry.set_current("terminal");
+        assert_eq!(registry.cycle_next().name, "postman");
         assert_eq!(registry.cycle_next().name, "dark");
-        assert_eq!(registry.cycle_next().name, "light");
     }
 }

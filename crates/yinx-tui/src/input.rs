@@ -452,7 +452,7 @@ impl InputHandler {
             let chord = self.pending_chord.clone();
             self.pending_chord.clear();
 
-                    match chord.as_slice() {
+            match chord.as_slice() {
                 // 'g' chord: gg (top), gt (next tab), gT (prev tab), gd (go to definition)
                 [KeyCode::Char('g')] => {
                     match event.code {
@@ -1380,7 +1380,9 @@ mod tests {
         assert_eq!(handler.pending_chord, vec![KeyCode::Char(']')]);
         let bracket2 = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::NONE);
         let events = handler.handle_key(bracket2);
-        assert!(events.iter().any(|e| matches!(e, AppEvent::Scrolled(i64::MAX))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AppEvent::Scrolled(i64::MAX))));
 
         // [[ collapse all
         let bracket3 = KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE);
@@ -1388,7 +1390,9 @@ mod tests {
         assert_eq!(handler.pending_chord, vec![KeyCode::Char('[')]);
         let bracket4 = KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE);
         let events = handler.handle_key(bracket4);
-        assert!(events.iter().any(|e| matches!(e, AppEvent::Scrolled(i64::MIN))));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AppEvent::Scrolled(i64::MIN))));
     }
 
     #[test]
@@ -1446,13 +1450,17 @@ mod tests {
         let _ = handler.handle_key(ctrl_w);
         let underscore = KeyEvent::new(KeyCode::Char('_'), KeyModifiers::NONE);
         let events = handler.handle_key(underscore);
-        assert!(events.iter().any(|e| matches!(e, AppEvent::MaximizePaneHeight)));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AppEvent::MaximizePaneHeight)));
 
         let mut handler = InputHandler::new();
         let _ = handler.handle_key(ctrl_w);
         let pipe = KeyEvent::new(KeyCode::Char('|'), KeyModifiers::NONE);
         let events = handler.handle_key(pipe);
-        assert!(events.iter().any(|e| matches!(e, AppEvent::MaximizePaneWidth)));
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AppEvent::MaximizePaneWidth)));
     }
 
     #[test]

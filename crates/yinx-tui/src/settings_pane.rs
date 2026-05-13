@@ -668,6 +668,7 @@ mod tests {
         pane.selected_index = 0; // theme
 
         let themes = pane.get_theme_list();
+        assert!(themes.contains(&"postman".to_string()));
         assert!(themes.contains(&"terminal".to_string()));
         assert!(themes.contains(&"dark".to_string()));
         assert!(themes.contains(&"light".to_string()));

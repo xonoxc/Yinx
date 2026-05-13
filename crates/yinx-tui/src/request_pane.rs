@@ -471,6 +471,75 @@ impl RequestPane {
         self.focused_field
     }
 
+    pub fn should_capture_normal_key(&self, key_code: KeyCode, modifiers: KeyModifiers) -> bool {
+        if modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::ALT) {
+            return false;
+        }
+
+        matches!(self.focused_field, FocusedField::Url)
+            && matches!(key_code, KeyCode::Char(_) | KeyCode::Backspace)
+    }
+
+    pub fn paste_text(&mut self, text: &str) -> bool {
+        if text.is_empty() {
+            return false;
+        }
+
+        match self.focused_editable_field() {
+            EditableField::Url => {
+                self.url_buffer.insert_str(&normalize_single_line(text));
+                self.url_autocomplete_visible = !self.url_buffer.as_str().is_empty();
+                self.url_autocomplete_selected = 0;
+                true
+            }
+            EditableField::Body => {
+                self.body_content.insert_str(text);
+                true
+            }
+            EditableField::HeaderName(index) => self
+                .headers
+                .get_mut(index)
+                .map(|(name, _)| name.insert_str(&normalize_single_line(text)))
+                .is_some(),
+            EditableField::HeaderValue(index) => self
+                .headers
+                .get_mut(index)
+                .map(|(_, value)| value.insert_str(&normalize_single_line(text)))
+                .is_some(),
+            EditableField::AuthUsername => {
+                self.auth_username.insert_str(&normalize_single_line(text));
+                true
+            }
+            EditableField::AuthPassword => {
+                self.auth_password.insert_str(&normalize_single_line(text));
+                true
+            }
+            EditableField::AuthToken => {
+                self.auth_token.insert_str(&normalize_single_line(text));
+                true
+            }
+            EditableField::AuthKeyName => {
+                self.auth_key_name.insert_str(&normalize_single_line(text));
+                true
+            }
+            EditableField::AuthKeyValue => {
+                self.auth_key_value.insert_str(&normalize_single_line(text));
+                true
+            }
+            EditableField::ParamKey(index) => self
+                .params
+                .get_mut(index)
+                .map(|(key, _)| key.insert_str(&normalize_single_line(text)))
+                .is_some(),
+            EditableField::ParamValue(index) => self
+                .params
+                .get_mut(index)
+                .map(|(_, value)| value.insert_str(&normalize_single_line(text)))
+                .is_some(),
+            EditableField::Headers | EditableField::AuthType => false,
+        }
+    }
+
     fn url_with_query_params(&self) -> String {
         let url = self.url();
         if url.trim().is_empty() || self.body_type == BodyType::Form {
@@ -1308,22 +1377,45 @@ impl RequestPane {
         theme: &Theme,
         is_active: bool,
     ) {
-        if area.width < 10 || area.height < 3 {
+        if area.width < 10 || area.height < 5 {
             return;
         }
 
-        let inner = area;
+        let block = Block::default()
+            .title(Line::from(vec![
+                Span::styled(" REQUEST ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::styled("  Ctrl+R Send  ", Style::default().fg(theme.muted_color())),
+            ]))
+            .borders(Borders::ALL)
+            .border_type(theme.tui_border_type())
+            .border_style(Style::default().fg(theme.border_color(is_active)))
+            .style(
+                Style::default()
+                    .bg(theme.pane_bg(is_active))
+                    .fg(theme.foreground.as_color()),
+            );
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Length(1), Constraint::Min(0)])
+            .constraints(vec![
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
             .split(inner);
 
         self.render_compact_method_url(frame, chunks[0], theme, is_active);
-        self.render_compact_tab_content(frame, chunks[1], theme, is_active);
+        self.render_compact_tabs(frame, chunks[1], theme, is_active);
+        self.render_compact_selected_tab(frame, chunks[2], theme, is_active);
 
         if self.method_popup_visible {
             self.render_method_popup(frame, area, theme);
+        }
+
+        if self.url_autocomplete_visible {
+            self.render_autocomplete(frame, chunks[0], theme);
         }
     }
 
@@ -1334,48 +1426,116 @@ impl RequestPane {
         theme: &Theme,
         is_active: bool,
     ) {
+        let method_focused = is_active && self.focused_field == FocusedField::Method;
         let url_focused = is_active && self.focused_field == FocusedField::Url;
 
         let method_color = self.method_theme_color(theme);
-        let method_text = Span::styled(
-            format!(" {} ", self.method.as_str()),
-            Style::default()
-                .fg(theme.pane.status_bar_bg.as_color())
-                .bg(method_color)
-                .add_modifier(Modifier::BOLD),
-        );
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(vec![
+                Constraint::Length(13),
+                Constraint::Min(10),
+                Constraint::Length(13),
+            ])
+            .split(area);
 
-        let url_text = if url_focused {
+        let method_label = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!(" {} ", self.method.as_str()),
+                Style::default()
+                    .fg(theme.pane.status_bar_bg.as_color())
+                    .bg(method_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled("METHOD", Style::default().fg(theme.muted_color())),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(theme.tui_border_type())
+                .border_style(Style::default().fg(if method_focused {
+                    theme.border.active_color.as_color()
+                } else {
+                    theme.border.color.as_color()
+                }))
+                .style(Style::default().bg(theme.subtle_bg())),
+        )
+        .alignment(Alignment::Center);
+        frame.render_widget(method_label, chunks[0]);
+
+        let url_text = if self.url_buffer.as_str().is_empty() {
+            "Paste or type a URL...".to_string()
+        } else if url_focused {
             self.url_buffer.as_str().to_string()
         } else {
             let url = self.url_buffer.as_str();
-            let max_len = area.width.saturating_sub(12) as usize;
-            if url.len() > max_len && max_len > 10 {
-                let half = max_len.saturating_sub(3) / 2;
-                format!(
-                    "{}…{}",
-                    &url[..half],
-                    &url[url.len().saturating_sub(half)..]
-                )
+            let max_len = chunks[1].width.saturating_sub(4) as usize;
+            if url.len() > max_len && max_len > 12 {
+                let head = max_len.saturating_sub(1);
+                format!("{}…", &url[..head])
             } else {
                 url.to_string()
             }
         };
 
-        let url_style = Style::default().fg(theme.foreground.as_color());
-        let url_span = Span::styled(url_text, url_style);
+        let url_para = Paragraph::new(url_text)
+            .block(
+                Block::default()
+                    .title(" ENDPOINT ")
+                    .borders(Borders::ALL)
+                    .border_type(theme.tui_border_type())
+                    .border_style(Style::default().fg(if url_focused {
+                        theme.border.active_color.as_color()
+                    } else {
+                        theme.border.color.as_color()
+                    }))
+                    .style(
+                        Style::default()
+                            .bg(theme.highlight.bg.as_color())
+                            .fg(theme.highlight.fg.as_color()),
+                    ),
+            )
+            .style(Style::default().fg(if self.url_buffer.as_str().is_empty() {
+                theme.placeholder_color()
+            } else {
+                theme.highlight.fg.as_color()
+            }))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(url_para, chunks[1]);
 
-        let line = Line::from(vec![method_text, Span::raw(" "), url_span]);
-        let paragraph = Paragraph::new(line).style(Style::default().bg(theme.pane_bg(is_active)));
-        frame.render_widget(paragraph, area);
+        let send_badge = Paragraph::new(Line::from(vec![
+            Span::styled(
+                " SEND ",
+                Style::default()
+                    .fg(theme.pane.status_bar_bg.as_color())
+                    .bg(method_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled("Ctrl+R", Style::default().fg(theme.muted_color())),
+        ]))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(theme.tui_border_type())
+                .border_style(Style::default().fg(if method_focused || url_focused {
+                    theme.border.active_color.as_color()
+                } else {
+                    theme.border.color.as_color()
+                }))
+                .style(Style::default().bg(theme.subtle_bg())),
+        )
+        .alignment(Alignment::Center);
+        frame.render_widget(send_badge, chunks[2]);
 
         if url_focused {
-            let mut cursor_x = 5u16;
+            let mut cursor_x = 1u16;
             let url_prefix = &self.url_buffer.as_str()[..self.url_buffer.cursor_pos];
             cursor_x = cursor_x.saturating_add(url_prefix.chars().count() as u16);
             frame.set_cursor_position(ratatui::prelude::Position::new(
-                area.x + cursor_x.min(area.width.saturating_sub(1)),
-                area.y,
+                chunks[1].x + cursor_x.min(chunks[1].width.saturating_sub(2)),
+                chunks[1].y + 1,
             ));
         }
     }
@@ -1392,52 +1552,33 @@ impl RequestPane {
         }
     }
 
-    fn render_compact_tab_content(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
-        theme: &Theme,
-        is_active: bool,
-    ) {
-        if area.height < 3 {
-            return;
-        }
-
-        let tab_height = 1;
-        let content_height = area.height.saturating_sub(tab_height);
-
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(vec![Constraint::Length(tab_height), Constraint::Min(0)])
-            .split(area);
-
-        self.render_compact_tabs(frame, chunks[0], theme, is_active);
-
-        if content_height > 0 {
-            self.render_compact_selected_tab(frame, chunks[1], theme, is_active);
-        }
-    }
-
     fn render_compact_tabs(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
         let mut spans: Vec<Span> = Vec::new();
         let titles = self.tab_titles();
 
         for (i, title) in titles.iter().enumerate() {
             if i > 0 {
-                spans.push(Span::raw(" │ "));
+                spans.push(Span::raw("  "));
             }
             if i == self.selected_tab {
                 spans.push(Span::styled(
-                    title.clone(),
+                    format!(" {} ", title),
                     Style::default()
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                         .add_modifier(Modifier::BOLD),
                 ));
             } else {
+                let is_tabs_focused = is_active && self.focused_field == FocusedField::Tabs;
                 spans.push(Span::styled(
-                    title.clone(),
-                    Style::default().fg(theme.title_color(false)),
+                    format!(" {} ", title),
+                    Style::default()
+                        .fg(if is_tabs_focused {
+                            theme.title_color(true)
+                        } else {
+                            theme.pane.inactive_title.as_color()
+                        })
+                        .bg(theme.subtle_bg()),
                 ));
             }
         }
@@ -1498,6 +1639,13 @@ impl RequestPane {
             rows,
             &[Constraint::Percentage(40), Constraint::Percentage(60)],
         )
+        .header(
+            Row::new(vec![Cell::from("Key"), Cell::from("Value")]).style(
+                Style::default()
+                    .fg(theme.muted_color())
+                    .add_modifier(Modifier::BOLD),
+            ),
+        )
         .block(
             Block::default().style(
                 Style::default()
@@ -1515,7 +1663,20 @@ impl RequestPane {
     }
 
     fn render_compact_body(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        let body_para = Paragraph::new(self.body_content.as_str())
+        let body_lines = if self.body_content.as_str().is_empty() {
+            vec![Line::from(Span::styled(
+                "Compose a request body here…",
+                Style::default().fg(theme.placeholder_color()),
+            ))]
+        } else {
+            self.body_content
+                .as_str()
+                .lines()
+                .map(|line| Line::from(line.to_string()))
+                .collect::<Vec<_>>()
+        };
+
+        let body_para = Paragraph::new(body_lines)
             .style(
                 Style::default()
                     .fg(theme.foreground.as_color())
@@ -1563,6 +1724,13 @@ impl RequestPane {
         let table = Table::new(
             rows,
             &[Constraint::Percentage(40), Constraint::Percentage(60)],
+        )
+        .header(
+            Row::new(vec![Cell::from("Key"), Cell::from("Value")]).style(
+                Style::default()
+                    .fg(theme.muted_color())
+                    .add_modifier(Modifier::BOLD),
+            ),
         )
         .block(
             Block::default().style(
@@ -2230,7 +2398,7 @@ impl RequestPane {
                 Block::default()
                     .title("Select Method")
                     .borders(Borders::ALL)
-                    .border_type(BorderType::Rounded)
+                    .border_type(theme.tui_border_type())
                     .border_style(Style::default().fg(theme.border.active_color.as_color()))
                     .style(
                         Style::default()
@@ -2631,6 +2799,26 @@ mod tests {
         pane.handle_key(KeyCode::Char('i'), KeyModifiers::NONE);
         pane.handle_key(KeyCode::Backspace, KeyModifiers::NONE);
         assert_eq!(pane.url(), "h");
+    }
+
+    #[test]
+    fn test_url_focus_captures_normal_mode_printable_keys() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Url);
+
+        assert!(pane.should_capture_normal_key(KeyCode::Char('p'), KeyModifiers::NONE));
+        assert!(pane.should_capture_normal_key(KeyCode::Char('?'), KeyModifiers::NONE));
+        assert!(!pane.should_capture_normal_key(KeyCode::Char('p'), KeyModifiers::CONTROL));
+    }
+
+    #[test]
+    fn test_paste_text_inserts_into_url_buffer() {
+        let mut pane = RequestPane::new();
+        pane.set_focused_field(FocusedField::Url);
+
+        assert!(pane.paste_text("https://example.com"));
+        assert_eq!(pane.url(), "https://example.com");
+        assert!(pane.url_autocomplete_visible);
     }
 
     #[test]

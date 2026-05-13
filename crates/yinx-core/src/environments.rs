@@ -71,8 +71,14 @@ mod tests {
 
     fn make_env(name: &str) -> Environment {
         let mut env = Environment::new(name.to_string());
-        env.add_variable(EnvironmentVariable::new("base_url".to_string(), "https://api.example.com".to_string()));
-        env.add_variable(EnvironmentVariable::new("token".to_string(), "abc123".to_string()));
+        env.add_variable(EnvironmentVariable::new(
+            "base_url".to_string(),
+            "https://api.example.com".to_string(),
+        ));
+        env.add_variable(EnvironmentVariable::new(
+            "token".to_string(),
+            "abc123".to_string(),
+        ));
         env
     }
 
@@ -87,7 +93,10 @@ mod tests {
     #[test]
     fn test_environment_add_variable() {
         let mut env = Environment::new("Staging".to_string());
-        env.add_variable(EnvironmentVariable::new("host".to_string(), "localhost".to_string()));
+        env.add_variable(EnvironmentVariable::new(
+            "host".to_string(),
+            "localhost".to_string(),
+        ));
         assert_eq!(env.variables.len(), 1);
     }
 

@@ -68,9 +68,8 @@ pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, Stri
             Ok(preview)
         }
         ImportSource::Postman(json) => {
-            let (collection, _warnings) =
-                super::postman::parse_collection_to_collection(&json)
-                    .map_err(|e| format!("{}", e))?;
+            let (collection, _warnings) = super::postman::parse_collection_to_collection(&json)
+                .map_err(|e| format!("{}", e))?;
             let items: Vec<ImportItem> = collection
                 .flatten_requests()
                 .into_iter()

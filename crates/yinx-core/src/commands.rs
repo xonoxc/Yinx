@@ -166,9 +166,11 @@ impl CommandRegistry {
             aliases: &["tabnew"],
             description: "Create a new request tab",
             category: CommandCategory::Navigation,
-            execute: || vec![AppEvent::TabOpened {
-                id: "new".to_string(),
-            }],
+            execute: || {
+                vec![AppEvent::TabOpened {
+                    id: "new".to_string(),
+                }]
+            },
         });
 
         registry.register(Command {
@@ -208,9 +210,11 @@ impl CommandRegistry {
             aliases: &["i"],
             description: "Import a collection (Postman, curl, etc)",
             category: CommandCategory::Collection,
-            execute: || vec![AppEvent::ImportStarted {
-                source: "manual".to_string(),
-            }],
+            execute: || {
+                vec![AppEvent::ImportStarted {
+                    source: "manual".to_string(),
+                }]
+            },
         });
 
         registry.register(Command {

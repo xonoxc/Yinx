@@ -586,9 +586,7 @@ mod tests {
     fn test_tabs_reducer_tab_opened() {
         let mut reducer = TabsReducer::new(10);
         let id = reducer.tab_manager.open_blank();
-        let diff = reducer.reduce(&AppEvent::TabOpened {
-            id: id.clone(),
-        });
+        let diff = reducer.reduce(&AppEvent::TabOpened { id: id.clone() });
         assert!(diff.ui_state_changed);
         assert!(diff.app_state_changed);
     }
@@ -661,7 +659,9 @@ mod tests {
     #[test]
     fn test_app_reducer_multiple_domains() {
         let mut app = AppReducer::new();
-        let diff = app.reduce(&AppEvent::CollectionCreated(Collection::new("Test".to_string())));
+        let diff = app.reduce(&AppEvent::CollectionCreated(Collection::new(
+            "Test".to_string(),
+        )));
         assert!(!diff.ui_state_changed);
         assert!(!diff.network_state_changed);
         assert!(diff.app_state_changed);

@@ -5,11 +5,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event::{
+        self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyModifiers,
+    },
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -91,7 +93,7 @@ impl TerminalGuard {
     pub fn enter_raw_mode() -> Result<Self, AppError> {
         terminal::enable_raw_mode().map_err(|e| AppError::TerminalRestore(e.to_string()))?;
         Self::hide_cursor()?;
-        crossterm::execute!(io::stdout(), EnterAlternateScreen)
+        crossterm::execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)
             .map_err(|e| AppError::TerminalRestore(e.to_string()))?;
         Ok(Self { raw_mode: true })
     }
@@ -109,7 +111,7 @@ impl TerminalGuard {
     }
 
     pub fn exit_raw_mode() -> Result<(), AppError> {
-        let _ = crossterm::execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = crossterm::execute!(io::stdout(), LeaveAlternateScreen, DisableBracketedPaste);
         terminal::disable_raw_mode().map_err(|e| AppError::TerminalRestore(e.to_string()))?;
         Self::show_cursor()?;
         Ok(())
@@ -127,7 +129,7 @@ impl TerminalGuard {
         if !self.raw_mode {
             terminal::enable_raw_mode().map_err(|e| AppError::TerminalRestore(e.to_string()))?;
             Self::hide_cursor()?;
-            crossterm::execute!(io::stdout(), EnterAlternateScreen)
+            crossterm::execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)
                 .map_err(|e| AppError::TerminalRestore(e.to_string()))?;
             self.raw_mode = true;
         }
@@ -138,7 +140,7 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         if self.raw_mode {
-            let _ = crossterm::execute!(io::stdout(), LeaveAlternateScreen);
+            let _ = crossterm::execute!(io::stdout(), LeaveAlternateScreen, DisableBracketedPaste);
             let _ = terminal::disable_raw_mode();
             let _ = Self::show_cursor();
         }
@@ -174,11 +176,11 @@ impl TuiShell {
         let mut logs_pane = LogsPane::new();
         logs_pane.add_log(
             LogLevel::Info,
-            "Welcome to Yinx. Edit the request, then press ^R to send.",
+            "Welcome to Yinx. Focus the URL bar and paste or type a request.",
         );
         logs_pane.add_log(
             LogLevel::Info,
-            "Tab: panes | ^R: send | Esc/q: quit | /: search",
+            "Ctrl+R sends, Tab cycles panes, Esc leaves insert mode.",
         );
 
         let mut theme_registry = ThemeRegistry::with_defaults();
@@ -255,6 +257,10 @@ impl TuiShell {
     async fn handle_event(&mut self, event: Event) -> Result<(), AppError> {
         match event {
             Event::Key(key_event) => self.handle_key(key_event).await,
+            Event::Paste(text) => {
+                self.handle_paste(&text);
+                Ok(())
+            }
             Event::Resize(width, height) => {
                 self.workspace_layout.update_terminal_size(width, height);
                 Ok(())
@@ -280,10 +286,20 @@ impl TuiShell {
             && wrects.sidebar.width > 0
         {
             self.active_pane = ActivePane::Sidebar;
-        } else if self.is_in_rect(mouse_event.column, mouse_event.row, wrects.center_bottom) {
-            self.active_pane = ActivePane::Response;
-        } else if self.is_in_rect(mouse_event.column, mouse_event.row, wrects.center_top) {
-            self.active_pane = ActivePane::Request;
+        } else {
+            let (response_area, logs_area) = split_response_logs(wrects.center_bottom);
+            if let Some(logs_rect) = logs_area {
+                if self.is_in_rect(mouse_event.column, mouse_event.row, logs_rect) {
+                    self.active_pane = ActivePane::Logs;
+                    return;
+                }
+            }
+
+            if self.is_in_rect(mouse_event.column, mouse_event.row, response_area) {
+                self.active_pane = ActivePane::Response;
+            } else if self.is_in_rect(mouse_event.column, mouse_event.row, wrects.center_top) {
+                self.active_pane = ActivePane::Request;
+            }
         }
     }
 
@@ -400,6 +416,18 @@ impl TuiShell {
                 }
                 _ => return Ok(()),
             }
+        }
+
+        if self.input_handler.current_mode() == InputMode::Normal
+            && self.active_pane == ActivePane::Request
+            && self
+                .request_pane
+                .should_capture_normal_key(key_event.code, key_event.modifiers)
+        {
+            let _ = self
+                .request_pane
+                .handle_key(key_event.code, key_event.modifiers);
+            return Ok(());
         }
 
         // Normal-mode global operations: resize, help, layout toggle, sidebar toggle
@@ -581,7 +609,9 @@ impl TuiShell {
                             self.sidebar.handle_key(KeyCode::Char('d'));
                         }
                         ActivePane::Request => {
-                            let _ = self.request_pane.handle_key(KeyCode::Char('d'), KeyModifiers::NONE);
+                            let _ = self
+                                .request_pane
+                                .handle_key(KeyCode::Char('d'), KeyModifiers::NONE);
                         }
                         _ => {}
                     }
@@ -609,6 +639,17 @@ impl TuiShell {
         }
 
         Ok(())
+    }
+
+    fn handle_paste(&mut self, text: &str) {
+        if self.command_palette.is_visible() || self.settings_pane.is_open() || self.show_help {
+            return;
+        }
+
+        if self.active_pane == ActivePane::Request && self.request_pane.paste_text(text) {
+            self.logs_pane
+                .add_log(LogLevel::Info, "Pasted into request editor");
+        }
     }
 
     async fn execute_request_with(
@@ -657,49 +698,50 @@ impl TuiShell {
             key_event.code
         };
         match self.active_pane {
-            ActivePane::Sidebar => {
-                match key_event.code {
-                    KeyCode::Char('r') => {
-                        if let Some(action) = self.sidebar.get_selected_history_action() {
-                            self.logs_pane.add_log(
-                                LogLevel::Info,
-                                format!("Loaded from history: {} {}", action.request.method, action.request.url.as_str()),
-                            );
-                            self.request_pane.set_request(action.request);
-                            self.active_pane = ActivePane::Request;
-                        }
-                        return;
+            ActivePane::Sidebar => match key_event.code {
+                KeyCode::Char('r') => {
+                    if let Some(action) = self.sidebar.get_selected_history_action() {
+                        self.logs_pane.add_log(
+                            LogLevel::Info,
+                            format!(
+                                "Loaded from history: {} {}",
+                                action.request.method,
+                                action.request.url.as_str()
+                            ),
+                        );
+                        self.request_pane.set_request(action.request);
+                        self.active_pane = ActivePane::Request;
                     }
-                    KeyCode::Char('C') => {
-                        if let Some(action) = self.sidebar.get_selected_history_action() {
-                            self.logs_pane.add_log(
-                                LogLevel::Info,
-                                format!("Curl: {}", action.curl),
-                            );
-                        }
-                        return;
-                    }
-                    KeyCode::Char('d') => {
-                        let entry_id = self.sidebar.selected_history_entry().map(|e| e.id.clone());
-                        if let Some(id) = entry_id {
-                            self.history.retain(|e| e.id != id);
-                            self.sidebar.set_history(self.history.clone());
-                            self.logs_pane.add_log(LogLevel::Info, "History entry deleted");
-                        }
-                        return;
-                    }
-                    KeyCode::Char('D') => {
-                        self.history.clear();
-                        self.sidebar.clear_history_items();
-                        self.logs_pane.add_log(LogLevel::Info, "History cleared");
-                        return;
-                    }
-                    _ => {
-                        let _ = self.sidebar.handle_key(code);
-                        self.active_env_id = self.sidebar.active_environment_id();
-                    }
+                    return;
                 }
-            }
+                KeyCode::Char('C') => {
+                    if let Some(action) = self.sidebar.get_selected_history_action() {
+                        self.logs_pane
+                            .add_log(LogLevel::Info, format!("Curl: {}", action.curl));
+                    }
+                    return;
+                }
+                KeyCode::Char('d') => {
+                    let entry_id = self.sidebar.selected_history_entry().map(|e| e.id.clone());
+                    if let Some(id) = entry_id {
+                        self.history.retain(|e| e.id != id);
+                        self.sidebar.set_history(self.history.clone());
+                        self.logs_pane
+                            .add_log(LogLevel::Info, "History entry deleted");
+                    }
+                    return;
+                }
+                KeyCode::Char('D') => {
+                    self.history.clear();
+                    self.sidebar.clear_history_items();
+                    self.logs_pane.add_log(LogLevel::Info, "History cleared");
+                    return;
+                }
+                _ => {
+                    let _ = self.sidebar.handle_key(code);
+                    self.active_env_id = self.sidebar.active_environment_id();
+                }
+            },
             ActivePane::Request => {
                 let _ = self.request_pane.handle_key(code, key_event.modifiers);
             }
@@ -799,6 +841,15 @@ impl TuiShell {
         self.workspace_layout
             .update_terminal_size(term_width, term_height);
 
+        frame.render_widget(
+            Block::default().style(
+                Style::default()
+                    .bg(self.theme.pane_bg(false))
+                    .fg(self.theme.foreground.as_color()),
+            ),
+            area,
+        );
+
         if term_width < 60 || term_height < 12 {
             self.render_minimal_fallback(frame, area);
             return;
@@ -846,13 +897,22 @@ impl TuiShell {
             self.active_pane == ActivePane::Request,
         );
 
-        // Response pane
+        let (response_area, logs_area) = split_response_logs(wrects.center_bottom);
         self.response_pane.render(
             frame,
-            wrects.center_bottom,
+            response_area,
             &self.theme,
             self.active_pane == ActivePane::Response,
         );
+
+        if let Some(logs_area) = logs_area {
+            self.logs_pane.render(
+                frame,
+                logs_area,
+                &self.theme,
+                self.active_pane == ActivePane::Logs,
+            );
+        }
 
         // Status bar
         self.render_status_bar(frame, wrects.status_bar);
@@ -899,6 +959,11 @@ impl TuiShell {
             .response_pane
             .response()
             .map(|response| format!("{} {}ms", response.status, response.timing_ms))
+            .or_else(|| {
+                self.response_pane
+                    .error()
+                    .map(|error| format!("Error: {}", truncate_status_text(error, 48)))
+            })
             .unwrap_or_else(|| "No response".to_string());
         let focus_label = match self.active_pane {
             ActivePane::Sidebar => "SIDEBAR",
@@ -911,13 +976,7 @@ impl TuiShell {
             .with_network_state(&self.network_state)
             .with_cursor(0, 0)
             .with_center(focus_label)
-            .with_right(&response_meta)
-            .with_hints(vec![
-                ("Tab", "Panes"),
-                ("^R", "Send"),
-                ("Ctrl+b", "Sidebar"),
-                ("Esc/q", "Quit"),
-            ]);
+            .with_right(&response_meta);
         status.render(frame, area, &self.theme);
     }
 
@@ -1026,6 +1085,16 @@ fn key_to_app_event(key_event: KeyEvent) -> Option<AppEvent> {
     Some(AppEvent::KeyPressed(key))
 }
 
+fn truncate_status_text(value: &str, max_chars: usize) -> String {
+    let mut chars = value.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
+}
+
 fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
     let width = area.width.saturating_mul(width_percent).saturating_div(100);
     let height = area
@@ -1035,6 +1104,28 @@ fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect::new(x, y, width.max(1), height.max(1))
+}
+
+fn split_response_logs(area: Rect) -> (Rect, Option<Rect>) {
+    if area.width < 64 || area.height < 10 {
+        return (area, None);
+    }
+
+    let logs_height = if area.height < 16 {
+        4
+    } else {
+        area.height.saturating_div(3).clamp(5, 9)
+    };
+    let response_height = area.height.saturating_sub(logs_height);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(response_height),
+            Constraint::Length(logs_height),
+        ])
+        .split(area);
+
+    (chunks[0], Some(chunks[1]))
 }
 
 pub struct EventLoop {

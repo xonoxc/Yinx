@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::request::Request;
-use crate::response::Response;
 use crate::collections::{Collection, CollectionItem};
 use crate::environments::Environment;
+use crate::request::Request;
+use crate::response::Response;
 use crate::state::{ActivePane, AppState, InputMode, NetworkState, UiState};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -12,9 +12,15 @@ pub enum AppEvent {
     KeyPressed(String),
     PaneChanged(ActivePane),
     ModeChanged(InputMode),
-    CursorMoved { lines: i64, cols: i64 },
+    CursorMoved {
+        lines: i64,
+        cols: i64,
+    },
     Scrolled(i64),
-    TerminalResized { width: u16, height: u16 },
+    TerminalResized {
+        width: u16,
+        height: u16,
+    },
     Quit,
     CyclePaneNext,
     CyclePanePrev,
@@ -33,61 +39,125 @@ pub enum AppEvent {
 
     // State events
     AppStateUpdated,
-    HistoryEntryAdded { id: String },
-    RequestSaved { id: String },
-    RequestDeleted { id: String },
+    HistoryEntryAdded {
+        id: String,
+    },
+    RequestSaved {
+        id: String,
+    },
+    RequestDeleted {
+        id: String,
+    },
 
     // Collection events
     CollectionCreated(Collection),
-    CollectionUpdated { id: String },
-    CollectionDeleted { id: String },
-    CollectionItemAdded { collection_id: String, item: CollectionItem },
-    CollectionItemRemoved { collection_id: String, index: usize },
-    CollectionItemMoved { collection_id: String, from: usize, to: usize },
+    CollectionUpdated {
+        id: String,
+    },
+    CollectionDeleted {
+        id: String,
+    },
+    CollectionItemAdded {
+        collection_id: String,
+        item: CollectionItem,
+    },
+    CollectionItemRemoved {
+        collection_id: String,
+        index: usize,
+    },
+    CollectionItemMoved {
+        collection_id: String,
+        from: usize,
+        to: usize,
+    },
 
     // Environment events
     EnvironmentCreated(Environment),
-    EnvironmentUpdated { id: String },
-    EnvironmentDeleted { id: String },
-    EnvironmentActivated { id: Option<String> },
-    EnvironmentVariableAdded { env_id: String },
-    EnvironmentVariableRemoved { env_id: String, key: String },
+    EnvironmentUpdated {
+        id: String,
+    },
+    EnvironmentDeleted {
+        id: String,
+    },
+    EnvironmentActivated {
+        id: Option<String>,
+    },
+    EnvironmentVariableAdded {
+        env_id: String,
+    },
+    EnvironmentVariableRemoved {
+        env_id: String,
+        key: String,
+    },
 
     // Tab events
-    TabOpened { id: String },
-    TabClosed { id: String },
-    TabSwitched { from: String, to: String },
+    TabOpened {
+        id: String,
+    },
+    TabClosed {
+        id: String,
+    },
+    TabSwitched {
+        from: String,
+        to: String,
+    },
     TabSwitchRelative(i64),
-    TabDirtyChanged { id: String, dirty: bool },
+    TabDirtyChanged {
+        id: String,
+        dirty: bool,
+    },
 
     // Workspace events
-    WorkspaceOpened { id: String },
+    WorkspaceOpened {
+        id: String,
+    },
     WorkspaceSaved,
     WorkspaceSettingsChanged,
 
     // Workflow events
-    WorkflowStarted { id: String },
-    WorkflowNodeCompleted { node_id: String },
-    WorkflowCompleted { id: String },
-    WorkflowFailed { id: String, error: String },
+    WorkflowStarted {
+        id: String,
+    },
+    WorkflowNodeCompleted {
+        node_id: String,
+    },
+    WorkflowCompleted {
+        id: String,
+    },
+    WorkflowFailed {
+        id: String,
+        error: String,
+    },
 
     // Storage events
     SaveState,
     StateLoaded,
 
     // Import events
-    ImportStarted { source: String },
-    ImportCompleted { count: usize },
-    ImportFailed { error: String },
+    ImportStarted {
+        source: String,
+    },
+    ImportCompleted {
+        count: usize,
+    },
+    ImportFailed {
+        error: String,
+    },
 
     // Settings events
     SettingsOpened,
-    SettingsChanged { key: String, value: String },
+    SettingsChanged {
+        key: String,
+        value: String,
+    },
     SettingsSaved,
     SettingsClosed,
 
     // Config events
-    ConfigChanged { key: String, value: String },
+    ConfigChanged {
+        key: String,
+        value: String,
+    },
 
     // Theme events
     ThemeChanged(String),

@@ -1,9 +1,9 @@
+use crate::client::HttpClient;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use yinx_core::request::Request;
 use yinx_core::response::Response;
-use crate::client::HttpClient;
 
 #[derive(Debug)]
 pub enum RequestEvent {

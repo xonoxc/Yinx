@@ -5,7 +5,7 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        BarChart, Block, BorderType, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap,
+        BarChart, Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap,
     },
     Frame,
 };
@@ -406,9 +406,9 @@ impl LogsPane {
 
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
         let block = Block::default()
-            .title("ACTIVITY")
+            .title(" ACTIVITY ")
             .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
+            .border_type(theme.tui_border_type())
             .border_style(Style::default().fg(theme.border_color(is_active)))
             .style(
                 Style::default()
@@ -477,18 +477,20 @@ impl LogsPane {
         let tabs = Tabs::new(titles)
             .select(self.selected_tab)
             .block(
-                Block::default().border_style(Style::default().fg(theme.border.color.as_color())),
+                Block::default()
+                    .borders(Borders::BOTTOM)
+                    .border_style(Style::default().fg(theme.border.color.as_color())),
             )
             .style(
                 Style::default()
-                    .bg(theme.subtle_bg())
+                    .bg(theme.pane_bg(false))
                     .fg(theme.foreground.as_color()),
             )
             .highlight_style(
                 Style::default()
                     .fg(theme.highlight.selected_fg.as_color())
                     .bg(theme.highlight.selected_bg.as_color())
-                    .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                    .add_modifier(Modifier::BOLD),
             );
 
         frame.render_widget(tabs, area);
@@ -518,14 +520,14 @@ impl LogsPane {
                     LogLevel::Error => theme.semantic.error.as_color(),
                 };
 
-                let spans = vec![
+                let mut spans = vec![
                     Span::styled(
                         entry.format_timestamp(),
-                        Style::default().fg(theme.semantic.info.as_color()),
+                        Style::default().fg(theme.muted_color()),
                     ),
                     Span::raw(" "),
                     Span::styled(
-                        entry.level.as_str(),
+                        format!(" {} ", entry.level.as_str()),
                         Style::default().fg(color).add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" "),
@@ -533,16 +535,14 @@ impl LogsPane {
                 ];
 
                 if let Some(ref context) = entry.context {
-                    let mut all_spans = spans;
-                    all_spans.push(Span::raw(" "));
-                    all_spans.push(Span::styled(
+                    spans.push(Span::raw(" "));
+                    spans.push(Span::styled(
                         format!("[{}]", context),
                         Style::default().fg(theme.semantic.info.as_color()),
                     ));
-                    ListItem::new(Line::from(all_spans))
-                } else {
-                    ListItem::new(Line::from(spans))
                 }
+
+                ListItem::new(Line::from(spans))
             })
             .collect();
 
@@ -556,9 +556,10 @@ impl LogsPane {
             .highlight_style(
                 Style::default()
                     .bg(theme.highlight.selected_bg.as_color())
-                    .fg(theme.highlight.selected_fg.as_color()),
+                    .fg(theme.highlight.selected_fg.as_color())
+                    .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(">> ");
+            .highlight_symbol(" ▎");
 
         let mut state = ListState::default();
         if !self.logs.is_empty() {

@@ -206,7 +206,9 @@ mod tests {
                 .unwrap(),
             tags: Vec::new(),
         };
-        c.add_item(yinx_core::collections::CollectionItem::Request(Box::new(saved)));
+        c.add_item(yinx_core::collections::CollectionItem::Request(Box::new(
+            saved,
+        )));
         ws.add_collection(c);
         store.save(&ws).unwrap();
         let loaded = store.load().unwrap().unwrap();

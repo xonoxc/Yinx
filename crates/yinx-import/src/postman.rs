@@ -336,10 +336,7 @@ fn convert_item_to_collection_item(
                             children.push(child);
                         }
                     }
-                    return Some(CollectionItem::Folder {
-                        name,
-                        children,
-                    });
+                    return Some(CollectionItem::Folder { name, children });
                 }
             }
 
@@ -349,18 +346,13 @@ fn convert_item_to_collection_item(
             }
         }
         PostmanItem::Folder {
-            name,
-            item: items,
-            ..
+            name, item: items, ..
         } => {
             let children: Vec<CollectionItem> = items
                 .into_iter()
                 .filter_map(|i| convert_item_to_collection_item(i, variables, warnings))
                 .collect();
-            Some(CollectionItem::Folder {
-                name,
-                children,
-            })
+            Some(CollectionItem::Folder { name, children })
         }
     }
 }
@@ -374,7 +366,10 @@ fn convert_request_to_saved(
     let method: Method = match req.method.parse() {
         Ok(m) => m,
         Err(_) => {
-            warnings.push(format!("Unknown method '{}' for request '{}'", req.method, name));
+            warnings.push(format!(
+                "Unknown method '{}' for request '{}'",
+                req.method, name
+            ));
             return None;
         }
     };
@@ -473,8 +468,7 @@ fn convert_body(
 }
 
 pub fn parse_environment_to_env(json: &str) -> Result<Environment, String> {
-    let postman_env: PostmanEnvironment =
-        serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let postman_env: PostmanEnvironment = serde_json::from_str(json).map_err(|e| e.to_string())?;
 
     let mut env = Environment::new(postman_env.name);
     for value in postman_env.values {

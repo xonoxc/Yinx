@@ -264,10 +264,7 @@ mod tests {
             .build()
             .unwrap();
         engine.interpolate_request(&mut request);
-        assert_eq!(
-            request.headers.get("Authorization"),
-            Some("Bearer abc123")
-        );
+        assert_eq!(request.headers.get("Authorization"), Some("Bearer abc123"));
     }
 
     #[test]
@@ -414,10 +411,7 @@ mod tests {
         ));
         let mut engine = VariableEngine::new().with_environment(env);
         engine.set_global("key".to_string(), "global_value".to_string());
-        assert_eq!(
-            engine.get_variable("key"),
-            Some("env_value".to_string())
-        );
+        assert_eq!(engine.get_variable("key"), Some("env_value".to_string()));
     }
 
     #[test]

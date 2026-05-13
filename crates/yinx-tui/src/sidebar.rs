@@ -407,8 +407,26 @@ impl Sidebar {
         }
 
         let block = Block::default()
-            .title(" SIDEBAR ")
+            .title(Line::from(vec![
+                Span::styled(" WORKSPACE ", Style::default().add_modifier(Modifier::BOLD)),
+                Span::raw(" "),
+                Span::styled(
+                    format!("{} collections", self.collections.len()),
+                    Style::default().fg(theme.muted_color()),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    format!("{} envs", self.environments.len()),
+                    Style::default().fg(theme.muted_color()),
+                ),
+                Span::raw(" "),
+                Span::styled(
+                    format!("{} history", self.history.len()),
+                    Style::default().fg(theme.muted_color()),
+                ),
+            ]))
             .borders(Borders::ALL)
+            .border_type(theme.tui_border_type())
             .border_style(Style::default().fg(theme.border_color(is_active)))
             .style(
                 Style::default()
@@ -417,6 +435,7 @@ impl Sidebar {
             );
         let inner = block.inner(area);
         frame.render_widget(block, area);
+        let line_width = inner.width.saturating_sub(4) as usize;
 
         let rendered_items: Vec<ListItem> = self
             .items
@@ -424,42 +443,75 @@ impl Sidebar {
             .enumerate()
             .map(|(_i, item)| match item {
                 SidebarItem::SectionHeader { section } => {
-                    let name = match section {
-                        SidebarSection::Collections => "COLLECTIONS",
-                        SidebarSection::Environments => "ENVIRONMENTS",
-                        SidebarSection::History => "HISTORY",
+                    let (name, is_collapsed) = match section {
+                        SidebarSection::Collections => (
+                            "COLLECTIONS",
+                            self.collapsed_sections
+                                .contains(&SidebarSection::Collections),
+                        ),
+                        SidebarSection::Environments => (
+                            "ENVIRONMENTS",
+                            self.collapsed_sections
+                                .contains(&SidebarSection::Environments),
+                        ),
+                        SidebarSection::History => (
+                            "HISTORY",
+                            self.collapsed_sections.contains(&SidebarSection::History),
+                        ),
                     };
+                    let icon = if is_collapsed { "▸" } else { "▾" };
                     ListItem::new(Line::from(Span::styled(
-                        format!(" {} ", name),
+                        format!(" {} {} ", icon, name),
                         Style::default()
                             .fg(theme.pane.title.as_color())
-                            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+                            .bg(theme.subtle_bg())
+                            .add_modifier(Modifier::BOLD),
                     )))
                 }
-                SidebarItem::CollectionHeader { name, .. } => {
+                SidebarItem::CollectionHeader { id, name } => {
+                    let icon = if self.collapsed_collections.contains(id) {
+                        "▸"
+                    } else {
+                        "▾"
+                    };
                     ListItem::new(Line::from(Span::styled(
-                        format!("  {} ", name),
+                        format!("  {} {} ", icon, truncate_text(name, line_width.saturating_sub(4))),
                         Style::default().fg(theme.semantic.info.as_color()),
                     )))
                 }
                 SidebarItem::CollectionFolder { name, depth } => {
+                    let key = vec![name.clone()];
+                    let icon = if self.collapsed_folders.contains(&key) {
+                        "▸"
+                    } else {
+                        "▾"
+                    };
                     let indent = "  ".repeat(*depth + 1);
                     ListItem::new(Line::from(Span::styled(
-                        format!("{} {} ", indent, name),
+                        format!(
+                            "{}{} {} ",
+                            indent,
+                            icon,
+                            truncate_text(name, line_width.saturating_sub(indent.len() + 4))
+                        ),
                         Style::default().fg(theme.semantic.warning.as_color()),
                     )))
                 }
                 SidebarItem::CollectionRequest { name, depth } => {
                     let indent = "  ".repeat(*depth + 2);
                     ListItem::new(Line::from(Span::styled(
-                        format!("{}● {} ", indent, name),
+                        format!(
+                            "{}▪ {} ",
+                            indent,
+                            truncate_text(name, line_width.saturating_sub(indent.len() + 4))
+                        ),
                         Style::default().fg(theme.foreground.as_color()),
                     )))
                 }
                 SidebarItem::Environment { name, active, .. } => {
                     let indicator = if *active { "●" } else { "○" };
                     ListItem::new(Line::from(Span::styled(
-                        format!("  {} {} ", indicator, name),
+                        format!("  {} {} ", indicator, truncate_text(name, line_width.saturating_sub(6))),
                         Style::default().fg(if *active {
                             theme.semantic.success.as_color()
                         } else {
@@ -471,6 +523,7 @@ impl Sidebar {
                     method,
                     url,
                     status,
+                    time_ago,
                     ..
                 } => {
                     let method_color = match method.as_str() {
@@ -492,26 +545,31 @@ impl Sidebar {
                     let status_str = status
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| "--".to_string());
-                    ListItem::new(Line::from(vec![
-                        Span::styled(
-                            format!(" {} ", method),
-                            Style::default()
-                                .fg(method_color)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw(" "),
-                        Span::styled(
-                            url.clone(),
+                    let url_display = truncate_text(url, line_width.saturating_sub(12));
+                    ListItem::new(vec![
+                        Line::from(vec![
+                            Span::styled(
+                                format!(" {} ", method),
+                                Style::default()
+                                    .fg(method_color)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!("{} ", status_str),
+                                Style::default()
+                                    .fg(status_color)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                time_ago,
+                                Style::default().fg(theme.muted_color()),
+                            ),
+                        ]),
+                        Line::from(Span::styled(
+                            format!("  {}", url_display),
                             Style::default().fg(theme.foreground.as_color()),
-                        ),
-                        Span::raw(" "),
-                        Span::styled(
-                            status_str,
-                            Style::default()
-                                .fg(status_color)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]))
+                        )),
+                    ])
                 }
             })
             .collect();
@@ -524,7 +582,7 @@ impl Sidebar {
                     .fg(theme.highlight.selected_fg.as_color())
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol("▸");
+            .highlight_symbol("▎");
 
         let mut state = ListState::default();
         state.select(Some(
@@ -564,6 +622,24 @@ impl Default for Sidebar {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn truncate_text(text: &str, max_width: usize) -> String {
+    if max_width == 0 {
+        return String::new();
+    }
+
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= max_width {
+        return text.to_string();
+    }
+
+    if max_width == 1 {
+        return "…".to_string();
+    }
+
+    let visible = max_width.saturating_sub(1);
+    format!("{}…", chars.into_iter().take(visible).collect::<String>())
 }
 
 fn relative_time(timestamp: chrono::DateTime<chrono::Utc>) -> String {

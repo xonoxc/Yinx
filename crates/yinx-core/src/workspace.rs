@@ -129,13 +129,18 @@ mod tests {
 
     fn make_collection(name: &str) -> Collection {
         let mut c = Collection::new(name.to_string());
-        c.add_item(CollectionItem::Request(Box::new(make_request("GET /users"))));
+        c.add_item(CollectionItem::Request(Box::new(make_request(
+            "GET /users",
+        ))));
         c
     }
 
     fn make_environment(name: &str) -> Environment {
         let mut env = Environment::new(name.to_string());
-        env.add_variable(EnvironmentVariable::new("base_url".to_string(), "https://api.example.com".to_string()));
+        env.add_variable(EnvironmentVariable::new(
+            "base_url".to_string(),
+            "https://api.example.com".to_string(),
+        ));
         env
     }
 

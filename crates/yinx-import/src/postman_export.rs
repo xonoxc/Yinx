@@ -29,11 +29,7 @@ pub fn export_collection(collection: &Collection) -> Result<ExportResult, Export
         return Err(ExportError::EmptyCollection);
     }
 
-    let items: Vec<PostmanItem> = collection
-        .items
-        .iter()
-        .map(convert_item)
-        .collect();
+    let items: Vec<PostmanItem> = collection.items.iter().map(convert_item).collect();
 
     let variables = extract_collection_variables(collection);
 
@@ -258,10 +254,7 @@ mod tests {
         SavedRequest {
             id: uuid::Uuid::new_v4().to_string(),
             name: name.to_string(),
-            request: RequestBuilder::new()
-                .url(url)
-                .build()
-                .unwrap(),
+            request: RequestBuilder::new().url(url).build().unwrap(),
             tags: Vec::new(),
         }
     }
@@ -461,8 +454,14 @@ mod tests {
         collection.add_item(CollectionItem::Folder {
             name: "Auth".to_string(),
             children: vec![
-                CollectionItem::Request(Box::new(make_request("Login", "https://example.com/login"))),
-                CollectionItem::Request(Box::new(make_request("Register", "https://example.com/register"))),
+                CollectionItem::Request(Box::new(make_request(
+                    "Login",
+                    "https://example.com/login",
+                ))),
+                CollectionItem::Request(Box::new(make_request(
+                    "Register",
+                    "https://example.com/register",
+                ))),
             ],
         });
         collection.add_item(CollectionItem::Request(Box::new(make_request(

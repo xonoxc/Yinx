@@ -524,11 +524,11 @@ impl Default for WorkspaceLayout {
             sidebar_visible: true,
             sidebar_width: 30,
             sidebar_min: 20,
-            sidebar_max_pct: 0.5,
-            center_split_ratio: 0.55,
+            sidebar_max_pct: 0.42,
+            center_split_ratio: 0.42,
             terminal_size: (80, 24),
-            tab_bar_height: 1,
-            status_bar_height: 1,
+            tab_bar_height: 2,
+            status_bar_height: 3,
         }
     }
 }
@@ -553,7 +553,7 @@ impl WorkspaceLayout {
     pub fn sidebar_visible(&self) -> bool {
         let (width, _) = self.terminal_size;
         // Auto-hide if terminal too small
-        if width < 80 {
+        if width < 90 {
             false
         } else {
             self.sidebar_visible
@@ -561,8 +561,7 @@ impl WorkspaceLayout {
     }
 
     pub fn sidebar_icon_only(&self) -> bool {
-        let (width, _) = self.terminal_size;
-        width < 100 && width >= 80
+        false
     }
 
     pub fn resize_sidebar(&mut self, delta: i16) {
@@ -581,16 +580,21 @@ impl WorkspaceLayout {
 
     pub fn calculate(&self) -> WorkspaceRects {
         let (term_width, term_height) = self.terminal_size;
+        let status_bar_height = if term_height < 28 {
+            1
+        } else {
+            self.status_bar_height
+        };
 
         // Minimal fallback for very small terminals
-        if term_width < 60 {
+        if term_width < 68 || term_height < 16 {
             let status_bar_area = Rect::new(
                 0,
-                term_height.saturating_sub(self.status_bar_height),
+                term_height.saturating_sub(status_bar_height),
                 term_width,
-                self.status_bar_height,
+                status_bar_height,
             );
-            let main_height = term_height.saturating_sub(self.status_bar_height).max(1);
+            let main_height = term_height.saturating_sub(status_bar_height).max(1);
             return WorkspaceRects {
                 sidebar: Rect::new(0, 0, 0, 0),
                 center_top: Rect::new(0, 0, term_width, main_height),
@@ -605,15 +609,15 @@ impl WorkspaceLayout {
 
         let status_bar_area = Rect::new(
             0,
-            term_height.saturating_sub(self.status_bar_height),
+            term_height.saturating_sub(status_bar_height),
             term_width,
-            self.status_bar_height,
+            status_bar_height,
         );
-        let main_height = term_height.saturating_sub(self.status_bar_height);
+        let main_height = term_height.saturating_sub(status_bar_height);
 
         let sidebar_width = if sidebar_visible {
             if icon_only {
-                self.sidebar_min.min(6).max(3)
+                self.sidebar_min.min(8).max(4)
             } else {
                 self.sidebar_width
                     .min(term_width.saturating_sub(self.sidebar_min))
@@ -626,11 +630,21 @@ impl WorkspaceLayout {
         let center_x = sidebar_width;
         let center_width = term_width.saturating_sub(sidebar_width);
 
-        let center_top_height = ((main_height as f32) * self.center_split_ratio) as u16;
-        let center_top_height = center_top_height.max(5).min(main_height.saturating_sub(5));
+        let split_ratio = if term_height < 30 {
+            self.center_split_ratio.max(0.46)
+        } else {
+            self.center_split_ratio
+        };
+        let center_top_height = ((main_height as f32) * split_ratio) as u16;
+        let center_top_height = center_top_height.max(6).min(main_height.saturating_sub(6));
         let center_bottom_height = main_height.saturating_sub(center_top_height);
 
-        let tab_bar_height = self.tab_bar_height.min(center_top_height);
+        let tab_bar_height = if center_width < 72 {
+            1
+        } else {
+            self.tab_bar_height
+        }
+        .min(center_top_height);
         let center_top_content_y = tab_bar_height;
 
         let tab_bar_area = Rect::new(center_x, 0, center_width, tab_bar_height);
