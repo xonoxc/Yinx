@@ -213,7 +213,7 @@ impl Theme {
             background: None,
             foreground: ColorDef::Reset,
             border: BorderStyle {
-                color: ColorDef::Indexed(8),
+                color: ColorDef::Indexed(242),
                 active_color: ColorDef::Indexed(12),
                 style: BorderType::Rounded,
             },
@@ -235,9 +235,9 @@ impl Theme {
                 inactive_background: None,
                 subtle_background: None,
                 title: ColorDef::Indexed(12),
-                inactive_title: ColorDef::Indexed(8),
-                muted: ColorDef::Indexed(8),
-                placeholder: ColorDef::Indexed(8),
+                inactive_title: ColorDef::Indexed(248),
+                muted: ColorDef::Indexed(248),
+                placeholder: ColorDef::Indexed(250),
                 status_bar_bg: ColorDef::Reset,
                 status_bar_fg: ColorDef::Indexed(15),
             },
@@ -248,16 +248,16 @@ impl Theme {
         Self {
             name: "dark".to_string(),
             background: Some(ColorDef::Rgb(13, 16, 22)),
-            foreground: ColorDef::Rgb(214, 220, 228),
+            foreground: ColorDef::Rgb(224, 230, 238),
             border: BorderStyle {
-                color: ColorDef::Rgb(67, 79, 97),
-                active_color: ColorDef::Rgb(138, 188, 255),
+                color: ColorDef::Rgb(82, 96, 116),
+                active_color: ColorDef::Rgb(150, 198, 255),
                 style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
-                bg: ColorDef::Rgb(24, 31, 42),
-                fg: ColorDef::Rgb(222, 227, 235),
-                selected_bg: ColorDef::Rgb(68, 103, 158),
+                bg: ColorDef::Rgb(30, 38, 50),
+                fg: ColorDef::Rgb(230, 235, 242),
+                selected_bg: ColorDef::Rgb(78, 118, 178),
                 selected_fg: ColorDef::WHITE,
             },
             semantic: SemanticColors {
@@ -271,12 +271,12 @@ impl Theme {
                 active_background: Some(ColorDef::Rgb(19, 25, 34)),
                 inactive_background: Some(ColorDef::Rgb(14, 18, 25)),
                 subtle_background: Some(ColorDef::Rgb(22, 28, 38)),
-                title: ColorDef::Rgb(190, 210, 236),
-                inactive_title: ColorDef::Rgb(106, 119, 138),
-                muted: ColorDef::Rgb(128, 140, 156),
-                placeholder: ColorDef::Rgb(100, 112, 130),
+                title: ColorDef::Rgb(200, 220, 245),
+                inactive_title: ColorDef::Rgb(170, 183, 205),
+                muted: ColorDef::Rgb(182, 195, 215),
+                placeholder: ColorDef::Rgb(168, 180, 198),
                 status_bar_bg: ColorDef::Rgb(18, 23, 32),
-                status_bar_fg: ColorDef::Rgb(214, 220, 228),
+                status_bar_fg: ColorDef::Rgb(224, 230, 238),
             },
         }
     }
@@ -287,7 +287,7 @@ impl Theme {
             background: None,
             foreground: ColorDef::Reset,
             border: BorderStyle {
-                color: ColorDef::Indexed(8),
+                color: ColorDef::Indexed(242),
                 active_color: ColorDef::Indexed(6),
                 style: BorderType::Rounded,
             },
@@ -309,9 +309,9 @@ impl Theme {
                 inactive_background: None,
                 subtle_background: None,
                 title: ColorDef::Indexed(6),
-                inactive_title: ColorDef::Indexed(8),
-                muted: ColorDef::Indexed(8),
-                placeholder: ColorDef::Indexed(8),
+                inactive_title: ColorDef::Indexed(248),
+                muted: ColorDef::Indexed(248),
+                placeholder: ColorDef::Indexed(250),
                 status_bar_bg: ColorDef::Reset,
                 status_bar_fg: ColorDef::Reset,
             },
@@ -359,16 +359,16 @@ impl Theme {
         Self {
             name: "forest".to_string(),
             background: Some(ColorDef::Rgb(14, 20, 17)),
-            foreground: ColorDef::Rgb(212, 220, 211),
+            foreground: ColorDef::Rgb(222, 230, 221),
             border: BorderStyle {
-                color: ColorDef::Rgb(68, 88, 76),
-                active_color: ColorDef::Rgb(130, 196, 160),
+                color: ColorDef::Rgb(84, 106, 92),
+                active_color: ColorDef::Rgb(140, 210, 172),
                 style: BorderType::Rounded,
             },
             highlight: HighlightStyle {
-                bg: ColorDef::Rgb(24, 36, 30),
-                fg: ColorDef::Rgb(220, 227, 217),
-                selected_bg: ColorDef::Rgb(63, 107, 87),
+                bg: ColorDef::Rgb(30, 44, 37),
+                fg: ColorDef::Rgb(228, 235, 225),
+                selected_bg: ColorDef::Rgb(73, 120, 98),
                 selected_fg: ColorDef::WHITE,
             },
             semantic: SemanticColors {
@@ -382,12 +382,12 @@ impl Theme {
                 active_background: Some(ColorDef::Rgb(20, 29, 24)),
                 inactive_background: Some(ColorDef::Rgb(14, 22, 18)),
                 subtle_background: Some(ColorDef::Rgb(22, 32, 27)),
-                title: ColorDef::Rgb(166, 210, 187),
-                inactive_title: ColorDef::Rgb(110, 130, 117),
-                muted: ColorDef::Rgb(130, 148, 136),
-                placeholder: ColorDef::Rgb(100, 118, 106),
+                title: ColorDef::Rgb(182, 222, 198),
+                inactive_title: ColorDef::Rgb(172, 188, 176),
+                muted: ColorDef::Rgb(182, 198, 188),
+                placeholder: ColorDef::Rgb(168, 182, 170),
                 status_bar_bg: ColorDef::Rgb(18, 27, 22),
-                status_bar_fg: ColorDef::Rgb(212, 220, 211),
+                status_bar_fg: ColorDef::Rgb(222, 230, 221),
             },
         }
     }
@@ -494,7 +494,7 @@ mod tests {
         assert_eq!(theme.name, "terminal");
         assert!(theme.background.is_none());
         assert_eq!(theme.foreground, ColorDef::Reset);
-        assert_eq!(theme.border.color, ColorDef::Indexed(8));
+        assert_eq!(theme.border.color, ColorDef::Indexed(242));
     }
 
     #[test]
