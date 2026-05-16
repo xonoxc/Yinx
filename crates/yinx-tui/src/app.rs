@@ -180,7 +180,7 @@ impl TuiShell {
         );
         logs_pane.add_log(
             LogLevel::Info,
-            "Ctrl+R sends, Tab cycles panes, Esc leaves insert mode.",
+            "Ctrl+Enter sends, Tab cycles panes, Esc leaves insert mode.",
         );
 
         let mut theme_registry = ThemeRegistry::with_defaults();
@@ -416,18 +416,6 @@ impl TuiShell {
                 }
                 _ => return Ok(()),
             }
-        }
-
-        if self.input_handler.current_mode() == InputMode::Normal
-            && self.active_pane == ActivePane::Request
-            && self
-                .request_pane
-                .should_capture_normal_key(key_event.code, key_event.modifiers)
-        {
-            let _ = self
-                .request_pane
-                .handle_key(key_event.code, key_event.modifiers);
-            return Ok(());
         }
 
         // Normal-mode global operations: resize, help, layout toggle, sidebar toggle
@@ -686,17 +674,24 @@ impl TuiShell {
 
     fn forward_key_to_active_pane(&mut self, key_event: KeyEvent) {
         let is_normal = self.input_handler.current_mode() == InputMode::Normal;
-        let code = if is_normal {
-            match key_event.code {
-                KeyCode::Char('h') => KeyCode::Left,
-                KeyCode::Char('j') => KeyCode::Down,
-                KeyCode::Char('k') => KeyCode::Up,
-                KeyCode::Char('l') => KeyCode::Right,
-                _ => key_event.code,
+
+        // Helper to convert vim motion keys to arrows
+        let to_nav_key = |code: KeyCode| -> Option<KeyCode> {
+            match code {
+                KeyCode::Char('h') if is_normal => Some(KeyCode::Left),
+                KeyCode::Char('j') if is_normal => Some(KeyCode::Down),
+                KeyCode::Char('k') if is_normal => Some(KeyCode::Up),
+                KeyCode::Char('l') if is_normal => Some(KeyCode::Right),
+                KeyCode::Char('G') if is_normal => Some(code),
+                KeyCode::Char('g') if is_normal => Some(code),
+                KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => Some(code),
+                KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown => Some(code),
+                KeyCode::Tab => Some(code),
+                _ if !is_normal => Some(code),
+                _ => None,
             }
-        } else {
-            key_event.code
         };
+
         match self.active_pane {
             ActivePane::Sidebar => match key_event.code {
                 KeyCode::Char('r') => {
@@ -738,18 +733,26 @@ impl TuiShell {
                     return;
                 }
                 _ => {
-                    let _ = self.sidebar.handle_key(code);
-                    self.active_env_id = self.sidebar.active_environment_id();
+                    if let Some(code) = to_nav_key(key_event.code) {
+                        let _ = self.sidebar.handle_key(code);
+                        self.active_env_id = self.sidebar.active_environment_id();
+                    }
                 }
             },
             ActivePane::Request => {
-                let _ = self.request_pane.handle_key(code, key_event.modifiers);
+                if let Some(code) = to_nav_key(key_event.code) {
+                    let _ = self.request_pane.handle_key(code, key_event.modifiers);
+                }
             }
             ActivePane::Logs => {
-                let _ = self.logs_pane.handle_key(code, key_event.modifiers);
+                if let Some(code) = to_nav_key(key_event.code) {
+                    let _ = self.logs_pane.handle_key(code, key_event.modifiers);
+                }
             }
             ActivePane::Response => {
-                let _ = self.response_pane.handle_key(code);
+                if let Some(code) = to_nav_key(key_event.code) {
+                    let _ = self.response_pane.handle_key(code);
+                }
             }
             _ => {}
         }
@@ -1026,8 +1029,8 @@ impl TuiShell {
                 "Actions",
                 Style::default().add_modifier(Modifier::BOLD),
             )]),
-            Line::from("  Space / Ctrl+R      Send request"),
-            Line::from("  t                   New tab"),
+            Line::from("  Space / Ctrl+Enter  Send request"),
+            Line::from("  Ctrl+N              New tab"),
             Line::from("  dd                  Delete item (list) / Delete line"),
             Line::from("  gd                  Go to definition"),
             Line::from("  T                   Cycle theme"),

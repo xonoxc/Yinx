@@ -470,8 +470,7 @@ impl ResponsePane {
             let placeholder = Paragraph::new(Line::from(vec![Span::styled(
                 " No response yet. Send a request to see results. ",
                 Style::default()
-                    .fg(theme.placeholder_color())
-                    .add_modifier(Modifier::ITALIC),
+                    .fg(theme.placeholder_color()),
             )]))
             .style(Style::default().fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: false });

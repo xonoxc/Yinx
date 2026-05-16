@@ -215,7 +215,7 @@ impl Theme {
             border: BorderStyle {
                 color: ColorDef::Indexed(242),
                 active_color: ColorDef::Indexed(12),
-                style: BorderType::Rounded,
+                style: BorderType::Plain,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Reset,
@@ -252,7 +252,7 @@ impl Theme {
             border: BorderStyle {
                 color: ColorDef::Rgb(82, 96, 116),
                 active_color: ColorDef::Rgb(150, 198, 255),
-                style: BorderType::Rounded,
+                style: BorderType::Plain,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Rgb(30, 38, 50),
@@ -289,7 +289,7 @@ impl Theme {
             border: BorderStyle {
                 color: ColorDef::Indexed(242),
                 active_color: ColorDef::Indexed(6),
-                style: BorderType::Rounded,
+                style: BorderType::Plain,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Reset,
@@ -326,7 +326,7 @@ impl Theme {
             border: BorderStyle {
                 color: ColorDef::Rgb(187, 177, 165),
                 active_color: ColorDef::Rgb(119, 131, 196),
-                style: BorderType::Rounded,
+                style: BorderType::Plain,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Rgb(237, 231, 223),
@@ -363,7 +363,7 @@ impl Theme {
             border: BorderStyle {
                 color: ColorDef::Rgb(84, 106, 92),
                 active_color: ColorDef::Rgb(140, 210, 172),
-                style: BorderType::Rounded,
+                style: BorderType::Plain,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Rgb(30, 44, 37),
@@ -527,7 +527,7 @@ mod tests {
     fn test_postman_theme_exists() {
         let theme = Theme::postman();
         assert_eq!(theme.name, "postman");
-        assert_eq!(theme.tui_border_type(), TuiBorderType::Rounded);
+        assert_eq!(theme.tui_border_type(), TuiBorderType::Plain);
     }
 
     #[test]

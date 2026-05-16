@@ -50,8 +50,7 @@ impl TabBar {
             spans.push(Span::styled(
                 "No open requests",
                 Style::default()
-                    .fg(theme.muted_color())
-                    .add_modifier(Modifier::ITALIC),
+                    .fg(theme.muted_color()),
             ));
         } else {
             let reserved = 14usize;

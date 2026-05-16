@@ -471,15 +471,6 @@ impl RequestPane {
         self.focused_field
     }
 
-    pub fn should_capture_normal_key(&self, key_code: KeyCode, modifiers: KeyModifiers) -> bool {
-        if modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::ALT) {
-            return false;
-        }
-
-        matches!(self.focused_field, FocusedField::Url)
-            && matches!(key_code, KeyCode::Char(_) | KeyCode::Backspace)
-    }
-
     pub fn paste_text(&mut self, text: &str) -> bool {
         if text.is_empty() {
             return false;
@@ -1383,8 +1374,7 @@ impl RequestPane {
 
         let block = Block::default()
             .title(Line::from(vec![
-                Span::styled(" REQUEST ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::styled("  Ctrl+R Send  ", Style::default().fg(theme.muted_color())),
+                    Span::styled(" REQUEST ", Style::default().add_modifier(Modifier::BOLD)),
             ]))
             .borders(Borders::ALL)
             .border_type(theme.tui_border_type())
@@ -1433,9 +1423,8 @@ impl RequestPane {
         let chunks = Layout::default()
             .direction(Direction::Horizontal)
             .constraints(vec![
-                Constraint::Length(13),
+                Constraint::Length(10),
                 Constraint::Min(10),
-                Constraint::Length(13),
             ])
             .split(area);
 
@@ -1447,8 +1436,6 @@ impl RequestPane {
                     .bg(method_color)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(" "),
-            Span::styled("METHOD", Style::default().fg(theme.muted_color())),
         ]))
         .block(
             Block::default()
@@ -1503,31 +1490,6 @@ impl RequestPane {
             }))
             .wrap(Wrap { trim: true });
         frame.render_widget(url_para, chunks[1]);
-
-        let send_badge = Paragraph::new(Line::from(vec![
-            Span::styled(
-                " SEND ",
-                Style::default()
-                    .fg(theme.pane.status_bar_bg.as_color())
-                    .bg(method_color)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled("Ctrl+R", Style::default().fg(theme.muted_color())),
-        ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(theme.tui_border_type())
-                .border_style(Style::default().fg(if method_focused || url_focused {
-                    theme.border.active_color.as_color()
-                } else {
-                    theme.border.color.as_color()
-                }))
-                .style(Style::default().bg(theme.subtle_bg())),
-        )
-        .alignment(Alignment::Center);
-        frame.render_widget(send_badge, chunks[2]);
 
         if url_focused {
             let mut cursor_x = 1u16;

@@ -342,7 +342,6 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::DeleteWord);
 
         // Actions
-        bindings.insert(KeyBinding::new("r", &["Ctrl"]), KeyAction::SendRequest);
         bindings.insert(KeyBinding::new("Enter", &["Ctrl"]), KeyAction::SendRequest);
         bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
 
@@ -362,7 +361,7 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("?", &[]), KeyAction::SearchResponse);
 
         // Tab management
-        bindings.insert(KeyBinding::new("t", &[]), KeyAction::NewTab);
+        bindings.insert(KeyBinding::new("n", &["Ctrl"]), KeyAction::NewTab);
         bindings.insert(KeyBinding::new("q", &["Ctrl"]), KeyAction::CloseTab);
 
         // Sidebar
@@ -378,12 +377,14 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("T", &[]), KeyAction::CycleTheme);
         bindings.insert(KeyBinding::new("t", &["Shift"]), KeyAction::CycleTheme);
 
-        // Ctrl+w chord actions
-        bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::ChordPaneNext);
+        // Ctrl+h/j/k/l direct pane navigation
         bindings.insert(KeyBinding::new("h", &["Ctrl"]), KeyAction::ChordPaneLeft);
         bindings.insert(KeyBinding::new("j", &["Ctrl"]), KeyAction::ChordPaneDown);
         bindings.insert(KeyBinding::new("k", &["Ctrl"]), KeyAction::ChordPaneUp);
         bindings.insert(KeyBinding::new("l", &["Ctrl"]), KeyAction::ChordPaneRight);
+
+        // Ctrl+w chord actions
+        bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::ChordPaneNext);
 
         Self { bindings }
     }
@@ -780,6 +781,10 @@ impl InputHandler {
             KeyCode::Backspace => {
                 events.push(AppEvent::KeyPressed("Backspace".to_string()));
             }
+            KeyCode::Enter if event.modifiers.contains(KeyModifiers::CONTROL) => {
+                let action = self.config.get_action(&event);
+                events.extend(self.apply_action(action));
+            }
             KeyCode::Enter => {
                 events.push(AppEvent::KeyPressed("Enter".to_string()));
             }
@@ -798,7 +803,6 @@ impl InputHandler {
                     self.mode = InputMode::Normal;
                     events.push(AppEvent::ModeChanged(InputMode::Normal));
                     match c {
-                        'r' => events.push(AppEvent::ExecuteRequest),
                         '1' => events
                             .push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Request)),
                         '2' => events.push(AppEvent::PaneChanged(
