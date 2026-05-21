@@ -409,8 +409,8 @@ impl Sidebar {
         let inner = area;
         let line_width = inner.width.saturating_sub(4) as usize;
 
-        // Background fill — uses pane.bg_color() (base) so sidebar differs from main panes
-        let bg = theme.pane.bg_color();
+        // Background fill
+        let bg = theme.pane_bg(is_active);
         frame.render_widget(
             Block::default().style(Style::default().bg(bg).fg(theme.foreground.as_color())),
             area,
