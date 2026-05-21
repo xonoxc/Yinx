@@ -50,7 +50,7 @@ impl TabBar {
             spans.push(Span::styled(
                 "No open requests",
                 Style::default()
-                    .fg(theme.muted_color()),
+                    .fg(theme.typography_level(3).0),
             ));
         } else {
             let reserved = 14usize;
@@ -81,8 +81,8 @@ impl TabBar {
                     spans.push(Span::styled(
                         tab_text,
                         Style::default()
-                            .fg(theme.title_color(false))
-                            .bg(theme.pane.inactive_background.as_ref().map(|c| c.as_color()).unwrap_or(theme.subtle_bg())),
+                            .fg(theme.typography_level(1).0)
+                            .bg(theme.subtle_bg()),
                     ));
                 }
             }
@@ -92,7 +92,7 @@ impl TabBar {
                 " + New ",
                 Style::default()
                     .fg(theme.semantic.success.as_color())
-                    .bg(theme.pane.inactive_background.as_ref().map(|c| c.as_color()).unwrap_or(theme.subtle_bg()))
+                    .bg(theme.subtle_bg())
                     .add_modifier(Modifier::BOLD),
             ));
         }
@@ -108,9 +108,14 @@ impl TabBar {
             return;
         }
 
+        let border_color = if is_active {
+            theme.border.active_color.as_color()
+        } else {
+            theme.dim_border_color()
+        };
         let block = Block::default()
             .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(theme.border_color(is_active)))
+            .border_style(Style::default().fg(border_color))
             .style(
                 Style::default()
                     .bg(theme.pane_bg(is_active))

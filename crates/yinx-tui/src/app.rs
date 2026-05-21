@@ -1114,10 +1114,10 @@ fn split_response_logs(area: Rect) -> (Rect, Option<Rect>) {
         return (area, None);
     }
 
-    let logs_height = if area.height < 16 {
-        4
+    let logs_height = if area.height < 20 {
+        3
     } else {
-        area.height.saturating_div(3).clamp(5, 9)
+        (area.height / 4).clamp(3, 6)
     };
     let response_height = area.height.saturating_sub(logs_height);
     let chunks = Layout::default()

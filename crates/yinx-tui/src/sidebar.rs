@@ -7,6 +7,8 @@ use ratatui::{
     Frame,
 };
 
+use crate::widgets::render_panel;
+
 use yinx_core::collections::{Collection, CollectionItem};
 use yinx_core::environments::Environment;
 use yinx_core::request::request_to_curl;
@@ -406,35 +408,22 @@ impl Sidebar {
             return;
         }
 
-        let block = Block::default()
-            .title(Line::from(vec![
-                Span::styled(" WORKSPACE ", Style::default().add_modifier(Modifier::BOLD)),
-                Span::raw(" "),
-                Span::styled(
-                    format!("{} collections", self.collections.len()),
-                    Style::default().fg(theme.muted_color()),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    format!("{} envs", self.environments.len()),
-                    Style::default().fg(theme.muted_color()),
-                ),
-                Span::raw(" "),
-                Span::styled(
-                    format!("{} history", self.history.len()),
-                    Style::default().fg(theme.muted_color()),
-                ),
-            ]))
-            .borders(Borders::ALL)
-            .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(theme.border_color(is_active)))
-            .style(
-                Style::default()
-                    .bg(theme.pane_bg(is_active))
-                    .fg(theme.foreground.as_color()),
-            );
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        let level: u8 = if is_active { 0 } else { 2 };
+        render_panel(frame, area, theme, " WORKSPACE ", is_active, level);
+        let inner = {
+            let border_color = if is_active {
+                theme.border.active_color.as_color()
+            } else {
+                theme.dim_border_color()
+            };
+            let bg = theme.pane_bg(is_active);
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(theme.tui_border_type())
+                .border_style(Style::default().fg(border_color))
+                .style(Style::default().bg(bg).fg(theme.foreground.as_color()))
+                .inner(area)
+        };
         let line_width = inner.width.saturating_sub(4) as usize;
 
         let rendered_items: Vec<ListItem> = self

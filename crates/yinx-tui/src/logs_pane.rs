@@ -9,6 +9,8 @@ use ratatui::{
     },
     Frame,
 };
+
+use crate::widgets::render_panel;
 use std::collections::VecDeque;
 
 use yinx_core::metrics::MetricsCollector;
@@ -405,21 +407,23 @@ impl LogsPane {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        let block = Block::default()
-            .title(" ACTIVITY ")
-            .borders(Borders::ALL)
-            .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(theme.border_color(is_active)))
-            .style(
-                Style::default()
-                    .bg(theme.pane_bg(is_active))
-                    .fg(theme.foreground.as_color()),
-            );
+        render_panel(frame, area, theme, " ACTIVITY ", is_active, 1);
+        let inner = {
+            let border_color = if is_active {
+                theme.border.active_color.as_color()
+            } else {
+                theme.dim_border_color()
+            };
+            let bg = theme.pane_bg(is_active);
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(theme.tui_border_type())
+                .border_style(Style::default().fg(border_color))
+                .style(Style::default().bg(bg).fg(theme.foreground.as_color()))
+                .inner(area)
+        };
 
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        if area.height <= 4 || (self.should_compact() && !is_active) {
+        if area.height <= 4 || (!is_active && self.should_compact()) {
             self.render_compact(frame, inner, theme);
             return;
         }

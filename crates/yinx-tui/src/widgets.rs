@@ -15,6 +15,46 @@ use yinx_http::streaming::{SnapshotKind, TimelineJumpTarget, TimelineState};
 
 use crate::theme::Theme;
 
+/// Renders a panel with lazygit/k9s-style title embedded in the top border.
+/// Active pane gets bright border + accent title; inactive gets dim border + muted title.
+pub fn render_panel(
+    frame: &mut Frame,
+    area: Rect,
+    theme: &Theme,
+    title: &str,
+    is_active: bool,
+    level: u8,
+) {
+    if area.width < 4 || area.height < 2 {
+        return;
+    }
+
+    let (title_color, title_mod) = theme.typography_level(level);
+    let border_color = if is_active {
+        theme.border.active_color.as_color()
+    } else {
+        theme.dim_border_color()
+    };
+    let bg = theme.pane_bg(is_active);
+
+    let block = Block::default()
+        .title(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(
+                title,
+                Style::default()
+                    .fg(title_color)
+                    .add_modifier(title_mod),
+            ),
+        ]))
+        .borders(Borders::ALL)
+        .border_type(theme.tui_border_type())
+        .border_style(Style::default().fg(border_color))
+        .style(Style::default().bg(bg).fg(theme.foreground.as_color()));
+
+    frame.render_widget(block, area);
+}
+
 pub struct Panel<'a> {
     title: &'a str,
     is_active: bool,
@@ -41,38 +81,7 @@ impl<'a> Panel<'a> {
     }
 
     pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let border_type = match self.border_style.or(Some(match theme.border.style {
-            crate::theme::BorderType::Plain => BorderType::Plain,
-            crate::theme::BorderType::Rounded => BorderType::Rounded,
-            crate::theme::BorderType::Double => BorderType::Double,
-            crate::theme::BorderType::Thick => BorderType::Thick,
-        })) {
-            Some(BorderType::Plain) => BorderType::Plain,
-            Some(BorderType::Rounded) => BorderType::Rounded,
-            Some(BorderType::Double) => BorderType::Double,
-            Some(BorderType::Thick) => BorderType::Thick,
-            _ => BorderType::Plain,
-        };
-
-        let mut title_prefix = self.title.to_uppercase();
-        if self.is_active {
-            title_prefix = format!(" {} ", title_prefix);
-        } else {
-            title_prefix = format!(" {} ", title_prefix);
-        }
-
-        let block = Block::default()
-            .title(title_prefix)
-            .borders(Borders::ALL)
-            .border_type(border_type)
-            .border_style(Style::default().fg(theme.border_color(self.is_active)))
-            .style(
-                Style::default()
-                    .bg(theme.pane_bg(self.is_active))
-                    .fg(theme.foreground.as_color()),
-            );
-
-        frame.render_widget(block, area);
+        render_panel(frame, area, theme, self.title, self.is_active, 0);
     }
 }
 
@@ -474,68 +483,90 @@ impl<'a> StatusBar<'a> {
             return;
         }
 
+        let bg_color = theme.pane.status_bar_bg.as_color();
+        let fg_color = theme.pane.status_bar_fg.as_color();
+        let dim_color = theme.muted_color();
+        let separator = Span::styled(" │ ", Style::default().fg(dim_color));
+
         let mode_span = Span::styled(
             format!(" {} ", self.mode),
             Style::default()
-                .fg(theme.pane.status_bar_bg.as_color())
+                .fg(bg_color)
                 .bg(self.mode_color(theme))
                 .add_modifier(Modifier::BOLD),
         );
 
         let network_span = Span::styled(
-            format!("{} ", self.network_status_text()),
+            self.network_status_text().to_string(),
             Style::default()
                 .fg(self.network_status_color(theme))
                 .add_modifier(Modifier::BOLD),
         );
 
+        let mut segments: Vec<Vec<Span>> = Vec::new();
+
+        // Segment 1: Mode + Network state
+        let seg1 = vec![Span::raw(" "), mode_span, Span::raw("  "), network_span];
+        segments.push(seg1);
+
+        // Segment 2: Focus label
+        if !self.center.is_empty() {
+            let mut seg2 = Vec::new();
+            seg2.push(Span::styled(
+                format!(" {} ", self.center),
+                Style::default()
+                    .fg(theme.border.active_color.as_color())
+                    .add_modifier(Modifier::BOLD),
+            ));
+            segments.push(seg2);
+        }
+
+        // Segment 3: Response info
+        if !self.right.is_empty() {
+            let mut seg3 = Vec::new();
+            seg3.push(Span::styled(
+                format!(" {} ", self.right),
+                Style::default().fg(theme.foreground.as_color()),
+            ));
+            segments.push(seg3);
+        }
+
+        // Segment 4: Cursor position
+        let mut seg4 = Vec::new();
+        seg4.push(Span::styled(
+            format!(" Ln{} Col{} ", self.cursor_line + 1, self.cursor_col + 1),
+            Style::default().fg(dim_color),
+        ));
+        segments.push(seg4);
+
+        // Build the line with separators between segments
+        let mut line: Vec<Span> = Vec::new();
+        for (i, seg) in segments.iter().enumerate() {
+            if i > 0 && !seg.is_empty() {
+                line.push(separator.clone());
+            }
+            line.extend(seg.iter().cloned());
+        }
+
+        // Append hints at the end
         let hint_spans: Vec<Span> = self
             .hints
             .iter()
             .flat_map(|(key, desc)| {
                 vec![
-                    Span::styled(*key, Style::default().fg(theme.muted_color())),
-                    Span::raw(" "),
-                    Span::styled(*desc, Style::default().fg(theme.foreground.as_color())),
                     Span::raw("  "),
+                    Span::styled(*key, Style::default().fg(dim_color)),
+                    Span::raw(" "),
+                    Span::styled(*desc, Style::default().fg(theme.typography_level(2).0)),
                 ]
             })
             .collect();
-
-        let mut line = vec![Span::raw(" "), mode_span, Span::raw("  "), network_span];
-
-        if !self.center.is_empty() {
-            line.push(Span::styled(
-                format!(" {}  ", self.center),
-                Style::default().fg(theme.title_color(true)),
-            ));
-        }
-
-        if !self.right.is_empty() {
-            line.push(Span::styled(
-                format!(" {}  ", self.right),
-                Style::default().fg(theme.foreground.as_color()),
-            ));
-        }
-
-        line.push(Span::styled(
-            format!(
-                "Ln {}, Col {}  ",
-                self.cursor_line + 1,
-                self.cursor_col + 1
-            ),
-            Style::default().fg(theme.muted_color()),
-        ));
         line.extend(hint_spans);
-
-        let border_color = theme.border.color.as_color();
-        let bg_color = theme.pane.status_bar_bg.as_color();
-        let fg_color = theme.pane.status_bar_fg.as_color();
 
         let block = Block::default()
             .borders(Borders::ALL)
             .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(border_color))
+            .border_style(Style::default().fg(theme.border.color.as_color()))
             .style(Style::default().bg(bg_color).fg(fg_color));
 
         let inner = block.inner(area);

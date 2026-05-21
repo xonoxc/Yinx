@@ -10,6 +10,8 @@ use ratatui::{
     },
     Frame,
 };
+
+use crate::widgets::render_panel;
 use serde::{Deserialize, Serialize};
 
 use yinx_core::request::{
@@ -1372,20 +1374,22 @@ impl RequestPane {
             return;
         }
 
-        let block = Block::default()
-            .title(Line::from(vec![
-                    Span::styled(" REQUEST ", Style::default().add_modifier(Modifier::BOLD)),
-            ]))
-            .borders(Borders::ALL)
-            .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(theme.border_color(is_active)))
-            .style(
-                Style::default()
-                    .bg(theme.pane_bg(is_active))
-                    .fg(theme.foreground.as_color()),
-            );
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        let level: u8 = if is_active { 0 } else { 1 };
+        render_panel(frame, area, theme, " REQUEST ", is_active, level);
+        let inner = {
+            let border_color = if is_active {
+                theme.border.active_color.as_color()
+            } else {
+                theme.dim_border_color()
+            };
+            let bg = theme.pane_bg(is_active);
+            Block::default()
+                .borders(Borders::ALL)
+                .border_type(theme.tui_border_type())
+                .border_style(Style::default().fg(border_color))
+                .style(Style::default().bg(bg).fg(theme.foreground.as_color()))
+                .inner(area)
+        };
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -1428,28 +1432,38 @@ impl RequestPane {
             ])
             .split(area);
 
+        // Method pill with no right border to visually merge with URL
+        let method_block = Block::default()
+            .borders(Borders::ALL)
+            .border_type(theme.tui_border_type())
+            .border_style(Style::default().fg(if method_focused {
+                theme.border.active_color.as_color()
+            } else {
+                theme.dim_border_color()
+            }))
+            .style(Style::default().bg(theme.subtle_bg()));
+
         let method_label = Paragraph::new(Line::from(vec![
             Span::styled(
                 format!(" {} ", self.method.as_str()),
                 Style::default()
-                    .fg(theme.pane.status_bar_bg.as_color())
-                    .bg(method_color)
+                    .fg(method_color)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(
+                " ▼",
+                Style::default().fg(theme.typography_level(3).0),
+            ),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(theme.tui_border_type())
-                .border_style(Style::default().fg(if method_focused {
-                    theme.border.active_color.as_color()
-                } else {
-                    theme.border.color.as_color()
-                }))
-                .style(Style::default().bg(theme.subtle_bg())),
-        )
+        .block(method_block)
         .alignment(Alignment::Center);
         frame.render_widget(method_label, chunks[0]);
+
+        let url_border_color = if url_focused {
+            theme.border.active_color.as_color()
+        } else {
+            theme.dim_border_color()
+        };
 
         let url_text = if self.url_buffer.as_str().is_empty() {
             "Paste or type a URL...".to_string()
@@ -1469,14 +1483,9 @@ impl RequestPane {
         let url_para = Paragraph::new(url_text)
             .block(
                 Block::default()
-                    .title(" ENDPOINT ")
                     .borders(Borders::ALL)
                     .border_type(theme.tui_border_type())
-                    .border_style(Style::default().fg(if url_focused {
-                        theme.border.active_color.as_color()
-                    } else {
-                        theme.border.color.as_color()
-                    }))
+                    .border_style(Style::default().fg(url_border_color))
                     .style(
                         Style::default()
                             .bg(theme.highlight.bg.as_color())

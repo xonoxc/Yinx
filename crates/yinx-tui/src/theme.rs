@@ -3,7 +3,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
-use ratatui::{style::Color, widgets::BorderType as TuiBorderType};
+use ratatui::style::{Color, Modifier};
+use ratatui::widgets::BorderType as TuiBorderType;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
@@ -83,6 +84,15 @@ pub struct SemanticColors {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TypographyLevels {
+    pub title: ColorDef,
+    pub heading: ColorDef,
+    pub body: ColorDef,
+    pub caption: ColorDef,
+    pub dim: ColorDef,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PaneColors {
     pub background: Option<ColorDef>,
     pub active_background: Option<ColorDef>,
@@ -94,6 +104,7 @@ pub struct PaneColors {
     pub placeholder: ColorDef,
     pub status_bar_bg: ColorDef,
     pub status_bar_fg: ColorDef,
+    pub typography: TypographyLevels,
 }
 
 impl PaneColors {
@@ -240,6 +251,13 @@ impl Theme {
                 placeholder: ColorDef::Indexed(250),
                 status_bar_bg: ColorDef::Reset,
                 status_bar_fg: ColorDef::Indexed(15),
+                typography: TypographyLevels {
+                    title: ColorDef::Indexed(12),
+                    heading: ColorDef::Indexed(250),
+                    body: ColorDef::Indexed(252),
+                    caption: ColorDef::Indexed(245),
+                    dim: ColorDef::Indexed(240),
+                },
             },
         }
     }
@@ -277,6 +295,13 @@ impl Theme {
                 placeholder: ColorDef::Rgb(168, 180, 198),
                 status_bar_bg: ColorDef::Rgb(18, 23, 32),
                 status_bar_fg: ColorDef::Rgb(224, 230, 238),
+                typography: TypographyLevels {
+                    title: ColorDef::Rgb(200, 220, 245),
+                    heading: ColorDef::Rgb(180, 192, 210),
+                    body: ColorDef::Rgb(224, 230, 238),
+                    caption: ColorDef::Rgb(150, 165, 185),
+                    dim: ColorDef::Rgb(80, 95, 115),
+                },
             },
         }
     }
@@ -314,6 +339,13 @@ impl Theme {
                 placeholder: ColorDef::Indexed(250),
                 status_bar_bg: ColorDef::Reset,
                 status_bar_fg: ColorDef::Reset,
+                typography: TypographyLevels {
+                    title: ColorDef::Indexed(6),
+                    heading: ColorDef::Indexed(250),
+                    body: ColorDef::Indexed(252),
+                    caption: ColorDef::Indexed(245),
+                    dim: ColorDef::Indexed(240),
+                },
             },
         }
     }
@@ -351,6 +383,13 @@ impl Theme {
                 placeholder: ColorDef::Rgb(152, 142, 131),
                 status_bar_bg: ColorDef::Rgb(235, 229, 221),
                 status_bar_fg: ColorDef::Rgb(48, 43, 37),
+                typography: TypographyLevels {
+                    title: ColorDef::Rgb(85, 97, 150),
+                    heading: ColorDef::Rgb(115, 105, 95),
+                    body: ColorDef::Rgb(48, 43, 37),
+                    caption: ColorDef::Rgb(140, 130, 120),
+                    dim: ColorDef::Rgb(175, 165, 155),
+                },
             },
         }
     }
@@ -388,6 +427,13 @@ impl Theme {
                 placeholder: ColorDef::Rgb(168, 182, 170),
                 status_bar_bg: ColorDef::Rgb(18, 27, 22),
                 status_bar_fg: ColorDef::Rgb(222, 230, 221),
+                typography: TypographyLevels {
+                    title: ColorDef::Rgb(182, 222, 198),
+                    heading: ColorDef::Rgb(182, 198, 188),
+                    body: ColorDef::Rgb(222, 230, 221),
+                    caption: ColorDef::Rgb(160, 178, 165),
+                    dim: ColorDef::Rgb(85, 105, 90),
+                },
             },
         }
     }
@@ -462,6 +508,32 @@ impl Theme {
 
     pub fn placeholder_color(&self) -> Color {
         self.pane.placeholder.as_color()
+    }
+
+    pub fn typography_level(&self, level: u8) -> (Color, Modifier) {
+        match level {
+            0 => (self.pane.typography.title.as_color(), Modifier::BOLD),
+            1 => (self.pane.typography.heading.as_color(), Modifier::BOLD),
+            2 => (self.pane.typography.body.as_color(), Modifier::empty()),
+            3 => (self.pane.typography.caption.as_color(), Modifier::DIM),
+            _ => (self.pane.typography.dim.as_color(), Modifier::DIM),
+        }
+    }
+
+    pub fn dim_border_color(&self) -> Color {
+        let mut c = self.border.color.as_color();
+        // Make it dimmer by mixing with background
+        if let Some(bg) = &self.pane.background {
+            let bg_c = bg.as_color();
+            if let (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) = (c, bg_c) {
+                c = Color::Rgb(
+                    (r1 as u16 * 1 + r2 as u16 * 2 / 3) as u8,
+                    (g1 as u16 * 1 + g2 as u16 * 2 / 3) as u8,
+                    (b1 as u16 * 1 + b2 as u16 * 2 / 3) as u8,
+                );
+            }
+        }
+        c
     }
 
     pub fn tui_border_type(&self) -> TuiBorderType {

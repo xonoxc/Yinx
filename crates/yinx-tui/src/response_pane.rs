@@ -6,6 +6,8 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Wrap},
     Frame,
 };
+
+use crate::widgets::render_panel;
 use std::collections::HashSet;
 use yinx_core::response::{Response, ResponseBody, StatusCategory};
 
@@ -450,30 +452,58 @@ impl ResponsePane {
         }
 
         let title = self.build_title(theme);
+        let level: u8 = if is_active { 0 } else { 1 };
 
-        let block = Block::default()
-            .title(title)
-            .borders(Borders::ALL)
-            .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(theme.border_color(is_active)))
-            .style(
-                Style::default()
-                    .bg(theme.pane_bg(is_active))
-                    .fg(theme.foreground.as_color()),
-            );
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        render_panel(frame, area, theme, "", is_active, level);
+        let inner = {
+            let border_color = if is_active {
+                theme.border.active_color.as_color()
+            } else {
+                theme.dim_border_color()
+            };
+            let bg = theme.pane_bg(is_active);
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_type(theme.tui_border_type())
+                .border_style(Style::default().fg(border_color))
+                .style(Style::default().bg(bg).fg(theme.foreground.as_color()))
+                .inner(area)
+        };
 
         let inner_height = inner.height as usize;
 
         if self.lines_cache.is_empty() && !self.has_content() {
-            let placeholder = Paragraph::new(Line::from(vec![Span::styled(
-                " No response yet. Send a request to see results. ",
-                Style::default()
-                    .fg(theme.placeholder_color()),
-            )]))
-            .style(Style::default().fg(theme.foreground.as_color()))
-            .wrap(Wrap { trim: false });
+            let empty_lines = vec![
+                Line::from(Span::styled(
+                    " No request executed ",
+                    Style::default().fg(theme.placeholder_color()),
+                )),
+                Line::from(Span::styled(
+                    "",
+                    Style::default(),
+                )),
+                Line::from(vec![
+                    Span::styled(" Ctrl+Enter ", Style::default().fg(theme.semantic.success.as_color()).add_modifier(Modifier::BOLD)),
+                    Span::styled("→ Send request", Style::default().fg(theme.typography_level(3).0)),
+                ]),
+                Line::from(vec![
+                    Span::styled(" Tab ", Style::default().fg(theme.semantic.info.as_color()).add_modifier(Modifier::BOLD)),
+                    Span::styled("→ Cycle panes", Style::default().fg(theme.typography_level(3).0)),
+                ]),
+                Line::from(Span::styled("", Style::default())),
+                Line::from(Span::styled(
+                    " Recent:",
+                    Style::default().fg(theme.typography_level(1).0),
+                )),
+                Line::from(Span::styled(
+                    "  (no history yet)",
+                    Style::default().fg(theme.typography_level(3).0),
+                )),
+            ];
+            let placeholder = Paragraph::new(empty_lines)
+                .style(Style::default().fg(theme.foreground.as_color()))
+                .wrap(Wrap { trim: false });
             frame.render_widget(placeholder, inner);
             return;
         }
