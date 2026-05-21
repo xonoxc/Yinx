@@ -1,17 +1,15 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
+        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
         Tabs, Wrap,
     },
     Frame,
 };
-
-use crate::widgets::render_panel;
 use serde::{Deserialize, Serialize};
 
 use yinx_core::request::{
@@ -1374,22 +1372,23 @@ impl RequestPane {
             return;
         }
 
-        let level: u8 = if is_active { 0 } else { 1 };
-        render_panel(frame, area, theme, " REQUEST ", is_active, level);
-        let inner = {
-            let border_color = if is_active {
-                theme.border.active_color.as_color()
-            } else {
-                theme.dim_border_color()
-            };
-            let bg = theme.pane_bg(is_active);
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(theme.tui_border_type())
-                .border_style(Style::default().fg(border_color))
-                .style(Style::default().bg(bg).fg(theme.foreground.as_color()))
-                .inner(area)
-        };
+        let bg = theme.pane_bg(is_active);
+        let inner = area;
+
+        // Background fill
+        frame.render_widget(
+            Block::default().style(Style::default().bg(bg).fg(theme.foreground.as_color())),
+            area,
+        );
+
+        // Active pane indicator: left-edge highlight bar
+        if is_active {
+            let indicator_area = Rect::new(area.x, area.y, 2, area.height);
+            frame.render_widget(
+                Block::default().style(Style::default().bg(theme.pane_bg(true)).fg(theme.border.active_color.as_color())),
+                indicator_area,
+            );
+        }
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -1424,26 +1423,28 @@ impl RequestPane {
         let url_focused = is_active && self.focused_field == FocusedField::Url;
 
         let method_color = self.method_theme_color(theme);
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(vec![
-                Constraint::Length(10),
-                Constraint::Min(10),
-            ])
-            .split(area);
+        let border_color = if method_focused || url_focused {
+            theme.border.active_color.as_color()
+        } else {
+            theme.dim_border_color()
+        };
 
-        // Method pill with no right border to visually merge with URL
-        let method_block = Block::default()
+        let bar_bg = theme.subtle_bg();
+
+        // Single continuous bar — method pill and URL share background
+        let bar_block = Block::default()
             .borders(Borders::ALL)
             .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(if method_focused {
-                theme.border.active_color.as_color()
-            } else {
-                theme.dim_border_color()
-            }))
-            .style(Style::default().bg(theme.subtle_bg()));
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(bar_bg));
 
-        let method_label = Paragraph::new(Line::from(vec![
+        let url_display = if self.url_buffer.as_str().is_empty() {
+            "Paste or type a URL..."
+        } else {
+            self.url_buffer.as_str()
+        };
+
+        let bar_content = Line::from(vec![
             Span::styled(
                 format!(" {} ", self.method.as_str()),
                 Style::default()
@@ -1451,62 +1452,34 @@ impl RequestPane {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                " ▼",
+                " ▼ ",
                 Style::default().fg(theme.typography_level(3).0),
             ),
-        ]))
-        .block(method_block)
-        .alignment(Alignment::Center);
-        frame.render_widget(method_label, chunks[0]);
+            Span::styled(
+                url_display,
+                Style::default().fg(if self.url_buffer.as_str().is_empty() {
+                    theme.placeholder_color()
+                } else {
+                    theme.foreground.as_color()
+                }),
+            ),
+        ]);
 
-        let url_border_color = if url_focused {
-            theme.border.active_color.as_color()
-        } else {
-            theme.dim_border_color()
-        };
-
-        let url_text = if self.url_buffer.as_str().is_empty() {
-            "Paste or type a URL...".to_string()
-        } else if url_focused {
-            self.url_buffer.as_str().to_string()
-        } else {
-            let url = self.url_buffer.as_str();
-            let max_len = chunks[1].width.saturating_sub(4) as usize;
-            if url.len() > max_len && max_len > 12 {
-                let head = max_len.saturating_sub(1);
-                format!("{}…", &url[..head])
-            } else {
-                url.to_string()
-            }
-        };
-
-        let url_para = Paragraph::new(url_text)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_type(theme.tui_border_type())
-                    .border_style(Style::default().fg(url_border_color))
-                    .style(
-                        Style::default()
-                            .bg(theme.highlight.bg.as_color())
-                            .fg(theme.highlight.fg.as_color()),
-                    ),
-            )
-            .style(Style::default().fg(if self.url_buffer.as_str().is_empty() {
-                theme.placeholder_color()
-            } else {
-                theme.highlight.fg.as_color()
-            }))
+        let bar_para = Paragraph::new(bar_content)
+            .block(bar_block)
+            .style(Style::default().bg(bar_bg))
             .wrap(Wrap { trim: true });
-        frame.render_widget(url_para, chunks[1]);
+        frame.render_widget(bar_para, area);
 
         if url_focused {
             let mut cursor_x = 1u16;
+            let method_part = format!(" {}  ▼  ", self.method.as_str());
             let url_prefix = &self.url_buffer.as_str()[..self.url_buffer.cursor_pos];
+            cursor_x = cursor_x.saturating_add(method_part.chars().count() as u16);
             cursor_x = cursor_x.saturating_add(url_prefix.chars().count() as u16);
             frame.set_cursor_position(ratatui::prelude::Position::new(
-                chunks[1].x + cursor_x.min(chunks[1].width.saturating_sub(2)),
-                chunks[1].y + 1,
+                area.x + cursor_x.min(area.width.saturating_sub(2)),
+                area.y + 1,
             ));
         }
     }
@@ -1720,19 +1693,17 @@ impl RequestPane {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        let block = Block::default()
-            .title("REQUEST CONFIG")
-            .borders(Borders::ALL)
-            .border_type(BorderType::Plain)
-            .border_style(Style::default().fg(theme.border_color(is_active)))
-            .style(
+        let inner = area;
+
+        // Background fill
+        frame.render_widget(
+            Block::default().style(
                 Style::default()
                     .bg(theme.pane_bg(is_active))
                     .fg(theme.foreground.as_color()),
-            );
-
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+            ),
+            area,
+        );
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -1760,67 +1731,64 @@ impl RequestPane {
         let method_focused = is_active && self.focused_field == FocusedField::Method;
         let url_focused = is_active && self.focused_field == FocusedField::Url;
 
-        let chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(vec![Constraint::Length(10), Constraint::Min(0)])
-            .split(area);
-
-        let method_text = self.method.as_str();
-        let method_style = if method_focused {
-            Style::default()
-                .fg(theme.highlight.selected_fg.as_color())
-                .bg(theme.highlight.selected_bg.as_color())
-                .add_modifier(Modifier::BOLD)
+        let method_color = self.method_theme_color(theme);
+        let border_color = if method_focused || url_focused {
+            theme.border.active_color.as_color()
         } else {
-            Style::default().fg(theme.foreground.as_color())
+            theme.dim_border_color()
         };
 
-        let method_block = Block::default()
+        let bar_bg = theme.subtle_bg();
+
+        // Single continuous bar
+        let bar_block = Block::default()
             .borders(Borders::ALL)
-            .border_style(if method_focused {
-                Style::default().fg(theme.border.active_color.as_color())
-            } else {
-                Style::default().fg(theme.border.color.as_color())
-            })
-            .style(Style::default().bg(theme.subtle_bg()));
+            .border_type(theme.tui_border_type())
+            .border_style(Style::default().fg(border_color))
+            .style(Style::default().bg(bar_bg));
 
-        let method_para = Paragraph::new(Line::from(vec![
-            Span::styled(method_text, method_style),
-            Span::raw(" ▼"),
-        ]))
-        .block(method_block)
-        .alignment(Alignment::Center);
+        let url_display = if self.url_buffer.as_str().is_empty() {
+            "Paste or type a URL..."
+        } else {
+            self.url_buffer.as_str()
+        };
 
-        frame.render_widget(method_para, chunks[0]);
-
-        let url_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(if url_focused {
-                Style::default().fg(theme.border.active_color.as_color())
-            } else {
-                Style::default().fg(theme.border.color.as_color())
-            })
-            .style(
+        let bar_content = Line::from(vec![
+            Span::styled(
+                format!(" {} ", self.method.as_str()),
                 Style::default()
-                    .bg(theme.highlight.bg.as_color())
-                    .fg(theme.highlight.fg.as_color()),
-            )
-            .title(" URL ");
+                    .fg(method_color)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " ▼  ",
+                Style::default().fg(theme.typography_level(3).0),
+            ),
+            Span::styled(
+                url_display,
+                Style::default().fg(if self.url_buffer.as_str().is_empty() {
+                    theme.placeholder_color()
+                } else {
+                    theme.foreground.as_color()
+                }),
+            ),
+        ]);
 
-        let url_para = Paragraph::new(self.url_buffer.as_str())
-            .block(url_block)
-            .style(Style::default().fg(theme.highlight.fg.as_color()))
+        let bar_para = Paragraph::new(bar_content)
+            .block(bar_block)
+            .style(Style::default().bg(bar_bg))
             .wrap(Wrap { trim: true });
-
-        frame.render_widget(url_para, chunks[1]);
+        frame.render_widget(bar_para, area);
 
         if url_focused {
-            let x_offset = self.url_buffer.as_str()[..self.url_buffer.cursor_pos]
-                .chars()
-                .count() as u16;
+            let mut cursor_x = 1u16;
+            let method_part = format!(" {}  ▼  ", self.method.as_str());
+            let url_prefix = &self.url_buffer.as_str()[..self.url_buffer.cursor_pos];
+            cursor_x = cursor_x.saturating_add(method_part.chars().count() as u16);
+            cursor_x = cursor_x.saturating_add(url_prefix.chars().count() as u16);
             frame.set_cursor_position(ratatui::prelude::Position::new(
-                chunks[1].x + 1 + x_offset,
-                chunks[1].y + 1,
+                area.x + cursor_x.min(area.width.saturating_sub(2)),
+                area.y + 1,
             ));
         }
     }
@@ -2773,13 +2741,12 @@ mod tests {
     }
 
     #[test]
-    fn test_url_focus_captures_normal_mode_printable_keys() {
+    fn test_url_focus_handles_printable_keys() {
         let mut pane = RequestPane::new();
         pane.set_focused_field(FocusedField::Url);
 
-        assert!(pane.should_capture_normal_key(KeyCode::Char('p'), KeyModifiers::NONE));
-        assert!(pane.should_capture_normal_key(KeyCode::Char('?'), KeyModifiers::NONE));
-        assert!(!pane.should_capture_normal_key(KeyCode::Char('p'), KeyModifiers::CONTROL));
+        assert!(pane.handle_key(KeyCode::Char('p'), KeyModifiers::NONE));
+        assert_eq!(pane.url(), "p");
     }
 
     #[test]

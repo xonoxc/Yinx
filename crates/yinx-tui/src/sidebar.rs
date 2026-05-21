@@ -1,13 +1,11 @@
 use crossterm::event::KeyCode;
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Paragraph},
     Frame,
 };
-
-use crate::widgets::render_panel;
 
 use yinx_core::collections::{Collection, CollectionItem};
 use yinx_core::environments::Environment;
@@ -408,23 +406,42 @@ impl Sidebar {
             return;
         }
 
-        let level: u8 = if is_active { 0 } else { 2 };
-        render_panel(frame, area, theme, " WORKSPACE ", is_active, level);
-        let inner = {
-            let border_color = if is_active {
-                theme.border.active_color.as_color()
-            } else {
-                theme.dim_border_color()
-            };
-            let bg = theme.pane_bg(is_active);
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(theme.tui_border_type())
-                .border_style(Style::default().fg(border_color))
-                .style(Style::default().bg(bg).fg(theme.foreground.as_color()))
-                .inner(area)
-        };
+        let inner = area;
         let line_width = inner.width.saturating_sub(4) as usize;
+
+        // Background fill — uses pane.bg_color() (base) so sidebar differs from main panes
+        let bg = theme.pane.bg_color();
+        frame.render_widget(
+            Block::default().style(Style::default().bg(bg).fg(theme.foreground.as_color())),
+            area,
+        );
+
+        // Subtle top divider
+        if area.height > 0 {
+            let divider_area = Rect::new(area.x, area.y, area.width, 1);
+            frame.render_widget(
+                Block::default().style(Style::default().bg(theme.subtle_bg()).fg(theme.muted_color())),
+                divider_area,
+            );
+        }
+
+        // Right-edge subtle divider
+        if area.width > 1 {
+            let divider_area = Rect::new(area.x + area.width - 1, area.y, 1, area.height);
+            frame.render_widget(
+                Block::default().style(Style::default().bg(theme.subtle_bg()).fg(theme.muted_color())),
+                divider_area,
+            );
+        }
+
+        // Active pane indicator: left-edge highlight bar
+        if is_active {
+            let indicator_area = Rect::new(area.x, area.y, 2, area.height);
+            frame.render_widget(
+                Block::default().style(Style::default().bg(theme.pane_bg(true)).fg(theme.border.active_color.as_color())),
+                indicator_area,
+            );
+        }
 
         let rendered_items: Vec<ListItem> = self
             .items
@@ -526,7 +543,7 @@ impl Sidebar {
                         .map(|s| match s {
                             200..=299 => theme.semantic.success.as_color(),
                             300..=399 => theme.semantic.warning.as_color(),
-                            400..=499 => Color::Indexed(208),
+                            400..=499 => theme.semantic.warning.as_color(),
                             500..=599 => theme.semantic.error.as_color(),
                             _ => theme.foreground.as_color(),
                         })

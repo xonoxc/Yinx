@@ -3,11 +3,9 @@ use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Wrap},
+    widgets::{Block, Paragraph, Wrap},
     Frame,
 };
-
-use crate::widgets::render_panel;
 use std::collections::HashSet;
 use yinx_core::response::{Response, ResponseBody, StatusCategory};
 
@@ -47,6 +45,8 @@ pub struct ResponsePane {
     response: Option<Response>,
     error: Option<String>,
     scroll_offset: usize,
+    cursor_line: usize,
+    scrolloff: usize,
     search_term: String,
     search_visible: bool,
     search_matches: Vec<usize>,
@@ -68,6 +68,8 @@ impl ResponsePane {
             response: None,
             error: None,
             scroll_offset: 0,
+            cursor_line: 0,
+            scrolloff: 0,
             search_term: String::new(),
             search_visible: false,
             search_matches: Vec::new(),
@@ -88,6 +90,7 @@ impl ResponsePane {
         self.response = Some(response);
         self.error = None;
         self.scroll_offset = 0;
+        self.cursor_line = 0;
         self.search_term.clear();
         self.search_visible = false;
         self.search_matches.clear();
@@ -335,28 +338,35 @@ impl ResponsePane {
         match key_code {
             KeyCode::Char('j') | KeyCode::Down => {
                 let max = self.lines_cache.len().saturating_sub(1);
-                if self.scroll_offset < max {
-                    self.scroll_offset += 1;
+                if self.cursor_line < max {
+                    self.cursor_line += 1;
                 }
+                self.apply_scrolloff();
                 true
             }
             KeyCode::Char('k') | KeyCode::Up => {
-                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                self.cursor_line = self.cursor_line.saturating_sub(1);
+                self.apply_scrolloff();
                 true
             }
             KeyCode::PageDown => {
-                self.scroll_offset = self
-                    .scroll_offset
-                    .saturating_add(self.max_visible_lines)
+                self.cursor_line = self
+                    .cursor_line
+                    .saturating_add(self.max_visible_lines.saturating_sub(self.scrolloff))
                     .min(self.lines_cache.len().saturating_sub(1));
+                self.apply_scrolloff();
                 true
             }
             KeyCode::PageUp => {
-                self.scroll_offset = self.scroll_offset.saturating_sub(self.max_visible_lines);
+                self.cursor_line = self
+                    .cursor_line
+                    .saturating_sub(self.max_visible_lines.saturating_sub(self.scrolloff));
+                self.apply_scrolloff();
                 true
             }
             KeyCode::Home | KeyCode::Char('g') => {
-                if key_code == KeyCode::Char('g') && self.scroll_offset > 0 {
+                if key_code == KeyCode::Char('g') && self.cursor_line > 0 {
+                    self.cursor_line = 0;
                     self.scroll_offset = 0;
                     true
                 } else {
@@ -364,6 +374,7 @@ impl ResponsePane {
                 }
             }
             KeyCode::End | KeyCode::Char('G') => {
+                self.cursor_line = self.lines_cache.len().saturating_sub(1);
                 self.scroll_offset = self
                     .lines_cache
                     .len()
@@ -402,18 +413,44 @@ impl ResponsePane {
             }
             KeyCode::Char('d') => {
                 let half = self.max_visible_lines.saturating_div(2).max(1);
-                self.scroll_offset = self
-                    .scroll_offset
+                self.cursor_line = self
+                    .cursor_line
                     .saturating_add(half)
                     .min(self.lines_cache.len().saturating_sub(1));
+                self.apply_scrolloff();
                 true
             }
             KeyCode::Char('u') => {
                 let half = self.max_visible_lines.saturating_div(2).max(1);
-                self.scroll_offset = self.scroll_offset.saturating_sub(half);
+                self.cursor_line = self.cursor_line.saturating_sub(half);
+                self.apply_scrolloff();
                 true
             }
             _ => false,
+        }
+    }
+
+    fn apply_scrolloff(&mut self) {
+        let viewport = self.max_visible_lines.max(1);
+        self.scrolloff = viewport / 2;
+        let total = self.lines_cache.len();
+
+        if total <= viewport {
+            self.scroll_offset = 0;
+            return;
+        }
+
+        if self.cursor_line < self.scroll_offset + self.scrolloff {
+            self.scroll_offset = self.cursor_line.saturating_sub(self.scrolloff);
+        }
+
+        let scroll_bottom = self.scroll_offset + viewport;
+        if self.cursor_line + self.scrolloff >= scroll_bottom && self.cursor_line + self.scrolloff < total {
+            self.scroll_offset = self.cursor_line.saturating_add(self.scrolloff).saturating_sub(viewport).min(total.saturating_sub(viewport));
+        }
+
+        if self.cursor_line > total.saturating_sub(self.scrolloff + 1) {
+            self.scroll_offset = total.saturating_sub(viewport);
         }
     }
 
@@ -451,27 +488,39 @@ impl ResponsePane {
             return;
         }
 
-        let title = self.build_title(theme);
-        let level: u8 = if is_active { 0 } else { 1 };
-
-        render_panel(frame, area, theme, "", is_active, level);
+        let bg = theme.pane_bg(is_active);
         let inner = {
-            let border_color = if is_active {
-                theme.border.active_color.as_color()
-            } else {
-                theme.dim_border_color()
-            };
-            let bg = theme.pane_bg(is_active);
-            Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_type(theme.tui_border_type())
-                .border_style(Style::default().fg(border_color))
-                .style(Style::default().bg(bg).fg(theme.foreground.as_color()))
-                .inner(area)
+            let has_title = self.response.is_some() || self.error.is_some();
+            let title_height = if has_title { 1u16 } else { 0u16 };
+            let inner_area = Rect::new(area.x, area.y + title_height, area.width, area.height.saturating_sub(title_height));
+            inner_area
         };
-
         let inner_height = inner.height as usize;
+
+        // Background fill
+        frame.render_widget(
+            Block::default().style(Style::default().bg(bg).fg(theme.foreground.as_color())),
+            area,
+        );
+
+        // Active pane indicator: left-edge highlight bar
+        if is_active {
+            let indicator_area = Rect::new(area.x, area.y, 2, area.height);
+            frame.render_widget(
+                Block::default().style(Style::default().bg(theme.pane_bg(true)).fg(theme.border.active_color.as_color())),
+                indicator_area,
+            );
+        }
+
+        // Title line
+        if self.response.is_some() || self.error.is_some() {
+            let title = self.build_title(theme);
+            let title_area = Rect::new(area.x + 2, area.y, area.width.saturating_sub(2), 1);
+            frame.render_widget(
+                Paragraph::new(title).style(Style::default().bg(bg).fg(theme.foreground.as_color())),
+                title_area,
+            );
+        }
 
         if self.lines_cache.is_empty() && !self.has_content() {
             let empty_lines = vec![
@@ -610,7 +659,7 @@ impl ResponsePane {
             let status_color = match response.status.category() {
                 StatusCategory::Success => theme.semantic.success.as_color(),
                 StatusCategory::Redirection => theme.semantic.warning.as_color(),
-                StatusCategory::ClientError => Color::Indexed(208),
+                StatusCategory::ClientError => theme.semantic.warning.as_color(),
                 StatusCategory::ServerError => theme.semantic.error.as_color(),
                 _ => theme.foreground.as_color(),
             };
@@ -779,7 +828,7 @@ impl ResponsePane {
                     let slice = &s[start..i];
                     spans.push(Span::styled(
                         slice.to_string(),
-                        Style::default().fg(ratatui::style::Color::Cyan),
+                        Style::default().fg(theme.semantic.info.as_color()),
                     ));
                 }
                 't' => {
@@ -995,7 +1044,7 @@ mod tests {
             .build();
         pane.set_response(response);
         pane.handle_key(KeyCode::Char('j'));
-        assert_eq!(pane.scroll_offset(), 1);
+        assert_eq!(pane.cursor_line, 1);
     }
 
     #[test]
@@ -1009,7 +1058,7 @@ mod tests {
         pane.handle_key(KeyCode::Char('j'));
         pane.handle_key(KeyCode::Char('j'));
         pane.handle_key(KeyCode::Char('k'));
-        assert_eq!(pane.scroll_offset(), 1);
+        assert_eq!(pane.cursor_line, 1);
     }
 
     #[test]
@@ -1087,7 +1136,7 @@ mod tests {
         pane.max_visible_lines = 20;
         // Ctrl+d goes down by half viewport
         pane.handle_key(KeyCode::Char('d'));
-        assert!(pane.scroll_offset() >= 10);
+        assert!(pane.cursor_line >= 10);
     }
 
     #[test]

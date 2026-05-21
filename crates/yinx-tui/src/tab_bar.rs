@@ -37,29 +37,20 @@ impl TabBar {
 
         let tabs = tab_manager.tabs();
         let active_idx = tab_manager.active_idx();
-        let mut spans: Vec<Span> = vec![Span::styled(
-            " YINX ",
-            Style::default()
-                .fg(theme.pane.status_bar_bg.as_color())
-                .bg(theme.border.active_color.as_color())
-                .add_modifier(Modifier::BOLD),
-        )];
+        let mut spans: Vec<Span> = Vec::new();
 
         if tabs.is_empty() {
-            spans.push(Span::raw(" "));
             spans.push(Span::styled(
-                "No open requests",
+                " No open requests ",
                 Style::default()
                     .fg(theme.typography_level(3).0),
             ));
         } else {
-            let reserved = 14usize;
+            let reserved = 8usize;
             let tab_width =
                 ((area.width as usize).saturating_sub(reserved) / tabs.len().max(1)).clamp(12, 28);
 
             for (i, tab) in tabs.iter().enumerate() {
-                spans.push(Span::raw(" "));
-
                 let dirty_indicator = if tab.dirty { "● " } else { "" };
                 let display_name = if tab.title.len() > tab_width.saturating_sub(4) {
                     format!("{}…", &tab.title[..tab_width.saturating_sub(5)])
@@ -67,33 +58,39 @@ impl TabBar {
                     tab.title.clone()
                 };
 
-                let tab_text = format!(" {}{} ", dirty_indicator, display_name);
+                let tab_text = format!(" {} ", dirty_indicator);
 
                 if i == active_idx {
                     spans.push(Span::styled(
-                        tab_text,
+                        format!("{}{}", tab_text, display_name),
                         Style::default()
-                            .fg(theme.highlight.selected_fg.as_color())
-                            .bg(theme.highlight.selected_bg.as_color())
+                            .fg(theme.foreground.as_color())
+                            .bg(theme.pane_bg(true))
                             .add_modifier(Modifier::BOLD),
                     ));
                 } else {
                     spans.push(Span::styled(
-                        tab_text,
+                        format!(" {}{} ", dirty_indicator, display_name),
                         Style::default()
-                            .fg(theme.typography_level(1).0)
-                            .bg(theme.subtle_bg()),
+                            .fg(theme.muted_color())
+                            .bg(theme.pane_bg(false)),
+                    ));
+                }
+
+                if i < tabs.len() - 1 {
+                    spans.push(Span::styled(
+                        "│",
+                        Style::default().fg(theme.muted_color()),
                     ));
                 }
             }
 
             spans.push(Span::raw(" "));
             spans.push(Span::styled(
-                " + New ",
+                "+New",
                 Style::default()
-                    .fg(theme.semantic.success.as_color())
-                    .bg(theme.subtle_bg())
-                    .add_modifier(Modifier::BOLD),
+                    .fg(theme.muted_color())
+                    .bg(theme.pane_bg(false)),
             ));
         }
 

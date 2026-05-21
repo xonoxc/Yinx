@@ -27,3 +27,4 @@ pub use request_pane::{
 pub use settings_pane::SettingsPane;
 pub use sidebar::{Sidebar, SidebarItem, SidebarSection};
 pub use tab_bar::TabBar;
+pub use theme::{relative_luminance, is_dark, DynamicTheme};

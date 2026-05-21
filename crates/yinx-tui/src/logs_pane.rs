@@ -10,7 +10,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::widgets::render_panel;
+
 use std::collections::VecDeque;
 
 use yinx_core::metrics::MetricsCollector;
@@ -407,21 +407,24 @@ impl LogsPane {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme, is_active: bool) {
-        render_panel(frame, area, theme, " ACTIVITY ", is_active, 1);
-        let inner = {
-            let border_color = if is_active {
-                theme.border.active_color.as_color()
-            } else {
-                theme.dim_border_color()
-            };
-            let bg = theme.pane_bg(is_active);
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(theme.tui_border_type())
-                .border_style(Style::default().fg(border_color))
-                .style(Style::default().bg(bg).fg(theme.foreground.as_color()))
-                .inner(area)
-        };
+        let bg = theme.pane_bg(is_active);
+
+        // Background fill
+        frame.render_widget(
+            Block::default().style(Style::default().bg(bg).fg(theme.foreground.as_color())),
+            area,
+        );
+
+        // Thin top divider
+        if area.height > 0 {
+            let divider_area = Rect::new(area.x, area.y, area.width, 1);
+            frame.render_widget(
+                Block::default().style(Style::default().bg(theme.subtle_bg()).fg(theme.border.color.as_color())),
+                divider_area,
+            );
+        }
+
+        let inner = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(1));
 
         if area.height <= 4 || (!is_active && self.should_compact()) {
             self.render_compact(frame, inner, theme);
@@ -440,26 +443,17 @@ impl LogsPane {
     fn render_compact(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         let latest = self
             .latest_entry()
-            .map(|entry| entry.message.as_str())
-            .unwrap_or("No activity yet");
+            .map(|entry| format!("{} {}", entry.level.as_str(), entry.message))
+            .unwrap_or_else(|| "No activity yet".to_string());
         let summary = Line::from(vec![
             Span::styled(
                 format!("{} logs", self.log_count()),
                 Style::default()
-                    .fg(theme.title_color(false))
+                    .fg(theme.typography_level(1).0)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw("  "),
-            Span::styled(
-                format!("{} errors", self.errors.len()),
-                Style::default().fg(if self.errors.is_empty() {
-                    theme.muted_color()
-                } else {
-                    theme.semantic.error.as_color()
-                }),
-            ),
-            Span::raw("  "),
-            Span::styled(latest, Style::default().fg(theme.placeholder_color())),
+            Span::styled(" │ ", Style::default().fg(theme.muted_color())),
+            Span::styled(latest, Style::default().fg(theme.typography_level(2).0)),
         ]);
 
         let paragraph = Paragraph::new(summary)

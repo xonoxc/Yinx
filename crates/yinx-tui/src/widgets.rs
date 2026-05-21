@@ -563,14 +563,20 @@ impl<'a> StatusBar<'a> {
             .collect();
         line.extend(hint_spans);
 
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(theme.border.color.as_color()))
-            .style(Style::default().bg(bg_color).fg(fg_color));
+        // Top divider line
+        if area.height > 0 {
+            let divider_area = Rect::new(area.x, area.y, area.width, 1);
+            frame.render_widget(
+                Block::default().style(Style::default().bg(theme.subtle_bg()).fg(theme.muted_color())),
+                divider_area,
+            );
+        }
 
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
+        let inner = if area.height > 1 {
+            Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(1))
+        } else {
+            area
+        };
 
         let paragraph = Paragraph::new(Line::from(line))
             .style(Style::default().bg(bg_color).fg(fg_color))

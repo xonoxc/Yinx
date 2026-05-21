@@ -6,6 +6,96 @@ use std::path::Path;
 use ratatui::style::{Color, Modifier};
 use ratatui::widgets::BorderType as TuiBorderType;
 
+pub fn relative_luminance(color: Color) -> f64 {
+    let (r, g, b) = match color {
+        Color::Rgb(r, g, b) => (r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0),
+        _ => return 0.5,
+    };
+    let linearize = |c: f64| -> f64 {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
+}
+
+pub fn is_dark(color: Color) -> bool {
+    relative_luminance(color) < 0.3
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct DynamicTheme {
+    pub bg_base: Color,
+    pub bg_elevated: Color,
+    pub bg_subtle: Color,
+    pub fg: Color,
+    pub fg_muted: Color,
+    pub border_muted: Color,
+    pub border_focus: Color,
+    pub accent: Color,
+    pub accent_dim: Color,
+    pub success: Color,
+    pub warning: Color,
+    pub error: Color,
+    pub selection_bg: Color,
+    pub panel_focus: Color,
+}
+
+impl DynamicTheme {
+    pub fn from_terminal(bg: Color, fg: Color, cursor: Color) -> Self {
+        let bg = match bg {
+            Color::Rgb(_, _, _) => bg,
+            _ => Color::Rgb(18, 18, 22),
+        };
+        let fg = match fg {
+            Color::Rgb(_, _, _) => fg,
+            _ => Color::Rgb(220, 220, 225),
+        };
+        let dark = is_dark(bg);
+
+        let blend = |a: Color, b: Color, t: f64| -> Color {
+            let (ar, ag, ab) = match a { Color::Rgb(r, g, b) => (r, g, b), _ => return a };
+            let (br, bg, bb) = match b { Color::Rgb(r, g, b) => (r, g, b), _ => return b };
+            Color::Rgb(
+                (ar as f64 + (br as f64 - ar as f64) * t) as u8,
+                (ag as f64 + (bg as f64 - ag as f64) * t) as u8,
+                (ab as f64 + (bb as f64 - ab as f64) * t) as u8,
+            )
+        };
+
+        let lighten = |c: Color, amt: f64| -> Color { blend(c, Color::Rgb(255, 255, 255), amt) };
+        let darken = |c: Color, amt: f64| -> Color { blend(c, Color::Rgb(0, 0, 0), amt) };
+
+        let bg_base = bg;
+        let bg_elevated = if dark { lighten(bg, 0.08) } else { darken(bg, 0.08) };
+        let bg_subtle = if dark { lighten(bg, 0.04) } else { darken(bg, 0.04) };
+        let accent = cursor;
+
+        Self {
+            bg_base,
+            bg_elevated,
+            bg_subtle,
+            fg,
+            fg_muted: blend(bg, fg, 0.3),
+            border_muted: blend(bg, fg, 0.15),
+            border_focus: accent,
+            accent,
+            accent_dim: if dark { darken(accent, 0.3) } else { lighten(accent, 0.3) },
+            success: if dark { Color::Rgb(80, 200, 120) } else { Color::Rgb(50, 160, 90) },
+            warning: Color::Rgb(255, 184, 108),
+            error: Color::Rgb(220, 50, 47),
+            selection_bg: blend(bg_elevated, accent, 0.3),
+            panel_focus: accent,
+        }
+    }
+
+    pub fn is_dark(&self) -> bool {
+        is_dark(self.bg_base)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Theme {
     pub name: String,
@@ -219,44 +309,49 @@ impl ThemeRegistry {
 
 impl Theme {
     pub fn terminal_default() -> Self {
+        let dt = DynamicTheme::from_terminal(
+            Color::Reset,
+            Color::Reset,
+            Color::Rgb(150, 200, 255),
+        );
         Self {
             name: "terminal".to_string(),
             background: None,
             foreground: ColorDef::Reset,
             border: BorderStyle {
-                color: ColorDef::Indexed(242),
-                active_color: ColorDef::Indexed(12),
+                color: ColorDef::from_color(dt.border_muted).unwrap_or(ColorDef::Reset),
+                active_color: ColorDef::from_color(dt.border_focus).unwrap_or(ColorDef::Reset),
                 style: BorderType::Plain,
             },
             highlight: HighlightStyle {
                 bg: ColorDef::Reset,
                 fg: ColorDef::Reset,
-                selected_bg: ColorDef::Indexed(12),
-                selected_fg: ColorDef::Indexed(15),
+                selected_bg: ColorDef::from_color(dt.selection_bg).unwrap_or(ColorDef::Reset),
+                selected_fg: ColorDef::Reset,
             },
             semantic: SemanticColors {
-                success: ColorDef::Indexed(2),
-                error: ColorDef::Indexed(1),
-                warning: ColorDef::Indexed(3),
-                info: ColorDef::Indexed(12),
+                success: ColorDef::from_color(dt.success).unwrap_or(ColorDef::Reset),
+                error: ColorDef::from_color(dt.error).unwrap_or(ColorDef::Reset),
+                warning: ColorDef::from_color(dt.warning).unwrap_or(ColorDef::Reset),
+                info: ColorDef::from_color(dt.border_focus).unwrap_or(ColorDef::Reset),
             },
             pane: PaneColors {
-                background: None,
-                active_background: None,
-                inactive_background: None,
-                subtle_background: None,
-                title: ColorDef::Indexed(12),
-                inactive_title: ColorDef::Indexed(248),
-                muted: ColorDef::Indexed(248),
-                placeholder: ColorDef::Indexed(250),
-                status_bar_bg: ColorDef::Reset,
-                status_bar_fg: ColorDef::Indexed(15),
+                background: Some(ColorDef::from_color(dt.bg_base).unwrap_or(ColorDef::Reset)),
+                active_background: Some(ColorDef::from_color(dt.bg_subtle).unwrap_or(ColorDef::Reset)),
+                inactive_background: Some(ColorDef::from_color(dt.bg_base).unwrap_or(ColorDef::Reset)),
+                subtle_background: Some(ColorDef::from_color(dt.bg_elevated).unwrap_or(ColorDef::Reset)),
+                title: ColorDef::from_color(dt.border_focus).unwrap_or(ColorDef::Reset),
+                inactive_title: ColorDef::from_color(dt.fg_muted).unwrap_or(ColorDef::Reset),
+                muted: ColorDef::from_color(dt.fg_muted).unwrap_or(ColorDef::Reset),
+                placeholder: ColorDef::from_color(dt.fg_muted).unwrap_or(ColorDef::Reset),
+                status_bar_bg: ColorDef::from_color(dt.bg_elevated).unwrap_or(ColorDef::Reset),
+                status_bar_fg: ColorDef::from_color(dt.fg_muted).unwrap_or(ColorDef::Reset),
                 typography: TypographyLevels {
-                    title: ColorDef::Indexed(12),
-                    heading: ColorDef::Indexed(250),
-                    body: ColorDef::Indexed(252),
-                    caption: ColorDef::Indexed(245),
-                    dim: ColorDef::Indexed(240),
+                    title: ColorDef::from_color(dt.border_focus).unwrap_or(ColorDef::Reset),
+                    heading: ColorDef::from_color(dt.fg_muted).unwrap_or(ColorDef::Reset),
+                    body: ColorDef::Reset,
+                    caption: ColorDef::from_color(dt.fg_muted).unwrap_or(ColorDef::Reset),
+                    dim: ColorDef::from_color(dt.fg_muted).unwrap_or(ColorDef::Reset),
                 },
             },
         }
@@ -561,12 +656,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_terminal_theme_uses_resets_and_indexed_colors() {
+    fn test_terminal_theme_uses_derived_colors() {
         let theme = Theme::terminal_default();
         assert_eq!(theme.name, "terminal");
         assert!(theme.background.is_none());
         assert_eq!(theme.foreground, ColorDef::Reset);
-        assert_eq!(theme.border.color, ColorDef::Indexed(242));
+        assert_ne!(theme.border.color, ColorDef::Reset);
     }
 
     #[test]
