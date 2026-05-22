@@ -416,33 +416,6 @@ impl Sidebar {
             area,
         );
 
-        // Subtle top divider
-        if area.height > 0 {
-            let divider_area = Rect::new(area.x, area.y, area.width, 1);
-            frame.render_widget(
-                Block::default().style(Style::default().bg(theme.subtle_bg()).fg(theme.muted_color())),
-                divider_area,
-            );
-        }
-
-        // Right-edge subtle divider
-        if area.width > 1 {
-            let divider_area = Rect::new(area.x + area.width - 1, area.y, 1, area.height);
-            frame.render_widget(
-                Block::default().style(Style::default().bg(theme.subtle_bg()).fg(theme.muted_color())),
-                divider_area,
-            );
-        }
-
-        // Active pane indicator: left-edge highlight bar
-        if is_active {
-            let indicator_area = Rect::new(area.x, area.y, 2, area.height);
-            frame.render_widget(
-                Block::default().style(Style::default().bg(theme.pane_bg(true)).fg(theme.border.active_color.as_color())),
-                indicator_area,
-            );
-        }
-
         let rendered_items: Vec<ListItem> = self
             .items
             .iter()
@@ -469,8 +442,7 @@ impl Sidebar {
                     ListItem::new(Line::from(Span::styled(
                         format!(" {} {} ", icon, name),
                         Style::default()
-                            .fg(theme.pane.title.as_color())
-                            .bg(theme.subtle_bg())
+                            .fg(theme.section_title())
                             .add_modifier(Modifier::BOLD),
                     )))
                 }

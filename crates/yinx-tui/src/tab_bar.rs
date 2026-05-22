@@ -2,7 +2,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -99,27 +99,6 @@ impl TabBar {
                 .bg(theme.pane_bg(is_active))
                 .fg(theme.foreground.as_color()),
         );
-
-        if area.height == 1 {
-            frame.render_widget(paragraph, area);
-            return;
-        }
-
-        let border_color = if is_active {
-            theme.border.active_color.as_color()
-        } else {
-            theme.dim_border_color()
-        };
-        let block = Block::default()
-            .borders(Borders::BOTTOM)
-            .border_style(Style::default().fg(border_color))
-            .style(
-                Style::default()
-                    .bg(theme.pane_bg(is_active))
-                    .fg(theme.foreground.as_color()),
-            );
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        frame.render_widget(paragraph, inner);
+        frame.render_widget(paragraph, area);
     }
 }

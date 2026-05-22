@@ -5,7 +5,7 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        BarChart, Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap,
+        BarChart, Block, List, ListItem, ListState, Paragraph, Tabs, Wrap,
     },
     Frame,
 };
@@ -415,16 +415,7 @@ impl LogsPane {
             area,
         );
 
-        // Thin top divider
-        if area.height > 0 {
-            let divider_area = Rect::new(area.x, area.y, area.width, 1);
-            frame.render_widget(
-                Block::default().style(Style::default().bg(theme.subtle_bg()).fg(theme.border.color.as_color())),
-                divider_area,
-            );
-        }
-
-        let inner = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(1));
+        let inner = area;
 
         if area.height <= 4 || (!is_active && self.should_compact()) {
             self.render_compact(frame, inner, theme);
@@ -474,11 +465,6 @@ impl LogsPane {
 
         let tabs = Tabs::new(titles)
             .select(self.selected_tab)
-            .block(
-                Block::default()
-                    .borders(Borders::BOTTOM)
-                    .border_style(Style::default().fg(theme.border.color.as_color())),
-            )
             .style(
                 Style::default()
                     .bg(theme.pane_bg(false))
@@ -545,19 +531,13 @@ impl LogsPane {
             .collect();
 
         let list = List::new(logs)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color())),
-            )
             .highlight_style(
                 Style::default()
                     .bg(theme.highlight.selected_bg.as_color())
                     .fg(theme.highlight.selected_fg.as_color())
                     .add_modifier(Modifier::BOLD),
             )
-            .highlight_symbol(" ▎");
+            .highlight_symbol("▎");
 
         let mut state = ListState::default();
         if !self.logs.is_empty() {
@@ -819,12 +799,7 @@ impl LogsPane {
         }
 
         let paragraph = Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color())),
-            )
+            .style(Style::default().bg(theme.pane_bg(false)).fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: true });
 
         frame.render_widget(paragraph, area);
@@ -860,23 +835,12 @@ impl LogsPane {
                 .collect();
 
             let barchart = BarChart::default()
-                .block(
-                    Block::default()
-                        .title("Request Duration Histogram (ms)")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(
-                            Style::default()
-                                .bg(theme.pane.bg_color())
-                                .fg(theme.foreground.as_color()),
-                        ),
-                )
                 .bar_width(8)
                 .bar_gap(1)
                 .bar_style(Style::default().fg(theme.semantic.info.as_color()))
                 .value_style(
                     Style::default()
-                        .fg(theme.pane.bg_color())
+                        .fg(theme.pane_bg(false))
                         .bg(theme.semantic.info.as_color()),
                 )
                 .data(&bar_data);
@@ -909,23 +873,12 @@ impl LogsPane {
                 .collect();
 
             let barchart = BarChart::default()
-                .block(
-                    Block::default()
-                        .title("Chunk Interval Histogram (ms)")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(
-                            Style::default()
-                                .bg(theme.pane.bg_color())
-                                .fg(theme.foreground.as_color()),
-                        ),
-                )
                 .bar_width(8)
                 .bar_gap(1)
                 .bar_style(Style::default().fg(theme.semantic.info.as_color()))
                 .value_style(
                     Style::default()
-                        .fg(theme.pane.bg_color())
+                        .fg(theme.pane_bg(false))
                         .bg(theme.semantic.info.as_color()),
                 )
                 .data(&bar_data);
@@ -934,13 +887,7 @@ impl LogsPane {
         } else {
             let paragraph =
                 Paragraph::new("No data available. Send requests to see the histogram.")
-                    .style(Style::default().fg(theme.foreground.as_color()))
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(theme.border.color.as_color()))
-                            .style(Style::default().bg(theme.pane.bg_color())),
-                    )
+                    .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(false)))
                     .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
@@ -954,13 +901,7 @@ impl LogsPane {
             let paragraph = Paragraph::new(
                 "No request data available. Send requests to see status code distribution.",
             )
-            .style(Style::default().fg(theme.foreground.as_color()))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color())),
-            )
+            .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(false)))
             .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
@@ -978,23 +919,12 @@ impl LogsPane {
 
         if !bar_data.is_empty() {
             let barchart = BarChart::default()
-                .block(
-                    Block::default()
-                        .title("Status Code Distribution")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(
-                            Style::default()
-                                .bg(theme.pane.bg_color())
-                                .fg(theme.foreground.as_color()),
-                        ),
-                )
                 .bar_width(8)
                 .bar_gap(1)
                 .bar_style(Style::default().fg(theme.semantic.info.as_color()))
                 .value_style(
                     Style::default()
-                        .fg(theme.pane.bg_color())
+                        .fg(theme.pane_bg(false))
                         .bg(theme.semantic.info.as_color()),
                 )
                 .data(&bar_data);
@@ -1009,13 +939,7 @@ impl LogsPane {
     fn render_errors(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if self.errors.is_empty() {
             let paragraph = Paragraph::new("No errors logged.")
-                .style(Style::default().fg(theme.foreground.as_color()))
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(Style::default().bg(theme.pane.bg_color())),
-                )
+                .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(false)))
                 .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
@@ -1058,12 +982,6 @@ impl LogsPane {
             .collect();
 
         let list = List::new(error_items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(Style::default().bg(theme.pane.bg_color())),
-            )
             .highlight_style(
                 Style::default()
                     .bg(theme.highlight.selected_bg.as_color())
@@ -1091,16 +1009,10 @@ impl LogsPane {
                 .collect();
 
             let paragraph = Paragraph::new(lines)
-                .block(
-                    Block::default()
-                        .title("Curl Equivalent")
-                        .borders(Borders::ALL)
-                        .border_style(Style::default().fg(theme.border.color.as_color()))
-                        .style(
-                            Style::default()
-                                .bg(theme.pane.bg_color())
-                                .fg(theme.foreground.as_color()),
-                        ),
+                .style(
+                    Style::default()
+                        .bg(theme.pane_bg(false))
+                        .fg(theme.foreground.as_color()),
                 )
                 .wrap(Wrap { trim: true });
             frame.render_widget(paragraph, area);
@@ -1108,18 +1020,7 @@ impl LogsPane {
             let paragraph = Paragraph::new(
                 "No request available. Create a request to see the curl equivalent.",
             )
-            .style(Style::default().fg(theme.foreground.as_color()))
-            .block(
-                Block::default()
-                    .title("Curl Equivalent")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(
-                        Style::default()
-                            .bg(theme.pane.bg_color())
-                            .fg(theme.foreground.as_color()),
-                    ),
-            )
+            .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(false)))
             .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }

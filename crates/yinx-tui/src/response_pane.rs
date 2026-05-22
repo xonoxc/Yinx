@@ -1,7 +1,7 @@
 use crossterm::event::KeyCode;
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Paragraph, Wrap},
     Frame,
@@ -503,15 +503,6 @@ impl ResponsePane {
             area,
         );
 
-        // Active pane indicator: left-edge highlight bar
-        if is_active {
-            let indicator_area = Rect::new(area.x, area.y, 2, area.height);
-            frame.render_widget(
-                Block::default().style(Style::default().bg(theme.pane_bg(true)).fg(theme.border.active_color.as_color())),
-                indicator_area,
-            );
-        }
-
         // Title line
         if self.response.is_some() || self.error.is_some() {
             let title = self.build_title(theme);
@@ -582,14 +573,14 @@ impl ResponsePane {
                         line.clone(),
                         Style::default()
                             .bg(theme.semantic.warning.as_color())
-                            .fg(ratatui::style::Color::Black),
+                            .fg(theme.pane_bg(true)),
                     ))
                 } else if is_match {
                     Line::from(Span::styled(
                         line.clone(),
                         Style::default()
                             .bg(theme.semantic.info.as_color())
-                            .fg(ratatui::style::Color::Black),
+                            .fg(theme.pane_bg(true)),
                     ))
                 } else if self.view_mode == ResponseViewMode::Pretty {
                     self.syntax_highlight_line(line, theme)
@@ -626,7 +617,7 @@ impl ResponsePane {
                 " [FOLLOWING] ",
                 Style::default()
                     .bg(theme.semantic.success.as_color())
-                    .fg(Color::Black),
+                    .fg(theme.pane_bg(true)),
             )));
             frame.render_widget(follow_text, follow_area);
         }

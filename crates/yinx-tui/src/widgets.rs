@@ -134,23 +134,21 @@ impl<'a> ScrollableList<'a> {
 
         let block = if let Some(title) = self.title {
             Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.color.as_color()))
+                .title(Line::from(Span::styled(
+                    format!(" {} ", title),
+                    Style::default().fg(theme.section_title()),
+                )))
                 .style(
                     Style::default()
-                        .bg(theme.pane.bg_color())
+                        .bg(theme.pane_bg(false))
                         .fg(theme.foreground.as_color()),
                 )
         } else {
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(
-                    Style::default()
-                        .bg(theme.pane.bg_color())
-                        .fg(theme.foreground.as_color()),
-                )
+            Block::default().style(
+                Style::default()
+                    .bg(theme.pane_bg(false))
+                    .fg(theme.foreground.as_color()),
+            )
         };
 
         let list = list.block(block);
@@ -232,14 +230,11 @@ impl<'a> TableWidget<'a> {
         let table = Table::new(rows, &constraints)
             .header(header)
             .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(
-                        Style::default()
-                            .bg(theme.pane.bg_color())
-                            .fg(theme.foreground.as_color()),
-                    ),
+                Block::default().style(
+                    Style::default()
+                        .bg(theme.pane_bg(false))
+                        .fg(theme.foreground.as_color()),
+                ),
             )
             .row_highlight_style(
                 Style::default()
@@ -284,14 +279,9 @@ impl<'a> TabsWidget<'a> {
 
         let tabs = Tabs::new(titles)
             .select(self.selected)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color())),
-            )
             .style(
                 Style::default()
-                    .bg(theme.pane.bg_color())
+                    .bg(theme.pane_bg(false))
                     .fg(theme.foreground.as_color()),
             )
             .highlight_style(
@@ -338,38 +328,34 @@ impl<'a> InputField<'a> {
     }
 
     pub fn render(self, frame: &mut Frame, area: Rect, theme: &Theme) {
-        let border_color = if self.is_focused {
-            theme.border.active_color.as_color()
+        let title_style = if self.is_focused {
+            Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)
         } else {
-            theme.border.color.as_color()
+            Style::default().fg(theme.text_muted())
         };
 
         let block = if let Some(title) = self.title {
             Block::default()
-                .title(title)
-                .borders(Borders::ALL)
-                .border_type(theme.tui_border_type())
-                .border_style(Style::default().fg(border_color))
+                .title(Line::from(Span::styled(
+                    format!(" {} ", title),
+                    title_style,
+                )))
                 .style(
                     Style::default()
-                        .bg(theme.highlight.bg.as_color())
-                        .fg(theme.highlight.fg.as_color()),
+                        .bg(theme.bg_element())
+                        .fg(theme.foreground.as_color()),
                 )
         } else {
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(theme.tui_border_type())
-                .border_style(Style::default().fg(border_color))
-                .style(
-                    Style::default()
-                        .bg(theme.highlight.bg.as_color())
-                        .fg(theme.highlight.fg.as_color()),
-                )
+            Block::default().style(
+                Style::default()
+                    .bg(theme.bg_element())
+                    .fg(theme.foreground.as_color()),
+            )
         };
 
         let paragraph = Paragraph::new(self.content)
             .block(block)
-            .style(Style::default().fg(theme.highlight.fg.as_color()))
+            .style(Style::default().fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: true });
 
         frame.render_widget(paragraph, area);
@@ -563,17 +549,8 @@ impl<'a> StatusBar<'a> {
             .collect();
         line.extend(hint_spans);
 
-        // Top divider line
-        if area.height > 0 {
-            let divider_area = Rect::new(area.x, area.y, area.width, 1);
-            frame.render_widget(
-                Block::default().style(Style::default().bg(theme.subtle_bg()).fg(theme.muted_color())),
-                divider_area,
-            );
-        }
-
-        let inner = if area.height > 1 {
-            Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(1))
+        let inner = if area.height > 0 {
+            area
         } else {
             area
         };
@@ -731,12 +708,13 @@ impl TimelineWidget {
         let paragraph = Paragraph::new(lines)
             .block(
                 Block::default()
-                    .title(self.title.as_str())
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
+                    .title(Line::from(Span::styled(
+                        format!(" {} ", self.title),
+                        Style::default().fg(theme.section_title()),
+                    )))
                     .style(
                         Style::default()
-                            .bg(theme.pane.bg_color())
+                            .bg(theme.pane_bg(false))
                             .fg(theme.foreground.as_color()),
                     ),
             )

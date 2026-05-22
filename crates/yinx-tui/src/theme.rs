@@ -617,7 +617,6 @@ impl Theme {
 
     pub fn dim_border_color(&self) -> Color {
         let mut c = self.border.color.as_color();
-        // Make it dimmer by mixing with background
         if let Some(bg) = &self.pane.background {
             let bg_c = bg.as_color();
             if let (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) = (c, bg_c) {
@@ -629,6 +628,30 @@ impl Theme {
             }
         }
         c
+    }
+
+    pub fn bg_panel(&self) -> Color {
+        self.pane.bg_color()
+    }
+
+    pub fn bg_element(&self) -> Color {
+        self.subtle_bg()
+    }
+
+    pub fn text_muted(&self) -> Color {
+        self.muted_color()
+    }
+
+    pub fn border_subtle(&self) -> Color {
+        self.dim_border_color()
+    }
+
+    pub fn section_title(&self) -> Color {
+        self.pane.title.as_color()
+    }
+
+    pub fn section_title_inactive(&self) -> Color {
+        self.pane.inactive_title.as_color()
     }
 
     pub fn tui_border_type(&self) -> TuiBorderType {

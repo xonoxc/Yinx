@@ -1381,15 +1381,6 @@ impl RequestPane {
             area,
         );
 
-        // Active pane indicator: left-edge highlight bar
-        if is_active {
-            let indicator_area = Rect::new(area.x, area.y, 2, area.height);
-            frame.render_widget(
-                Block::default().style(Style::default().bg(theme.pane_bg(true)).fg(theme.border.active_color.as_color())),
-                indicator_area,
-            );
-        }
-
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints(vec![
@@ -1423,25 +1414,24 @@ impl RequestPane {
         let url_focused = is_active && self.focused_field == FocusedField::Url;
 
         let method_color = self.method_theme_color(theme);
-        let border_color = if method_focused || url_focused {
-            theme.border.active_color.as_color()
+        let bar_bg = if is_active && (method_focused || url_focused) {
+            theme.bg_element()
         } else {
-            theme.dim_border_color()
+            theme.pane_bg(is_active)
         };
-
-        let bar_bg = theme.subtle_bg();
-
-        // Single continuous bar — method pill and URL share background
-        let bar_block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(bar_bg));
 
         let url_display = if self.url_buffer.as_str().is_empty() {
             "Paste or type a URL..."
         } else {
             self.url_buffer.as_str()
+        };
+
+        let url_style = if self.url_buffer.as_str().is_empty() {
+            theme.placeholder_color()
+        } else if url_focused {
+            theme.foreground.as_color()
+        } else {
+            theme.text_muted()
         };
 
         let bar_content = Line::from(vec![
@@ -1451,35 +1441,24 @@ impl RequestPane {
                     .fg(method_color)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                " ▼ ",
-                Style::default().fg(theme.typography_level(3).0),
-            ),
-            Span::styled(
-                url_display,
-                Style::default().fg(if self.url_buffer.as_str().is_empty() {
-                    theme.placeholder_color()
-                } else {
-                    theme.foreground.as_color()
-                }),
-            ),
+            Span::styled("  ", Style::default().fg(theme.text_muted())),
+            Span::styled(url_display, Style::default().fg(url_style)),
         ]);
 
         let bar_para = Paragraph::new(bar_content)
-            .block(bar_block)
-            .style(Style::default().bg(bar_bg))
+            .style(Style::default().bg(bar_bg).fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: true });
         frame.render_widget(bar_para, area);
 
         if url_focused {
-            let mut cursor_x = 1u16;
-            let method_part = format!(" {}  ▼  ", self.method.as_str());
+            let mut cursor_x = 0u16;
+            let method_part = format!(" {}  ", self.method.as_str());
             let url_prefix = &self.url_buffer.as_str()[..self.url_buffer.cursor_pos];
             cursor_x = cursor_x.saturating_add(method_part.chars().count() as u16);
             cursor_x = cursor_x.saturating_add(url_prefix.chars().count() as u16);
             frame.set_cursor_position(ratatui::prelude::Position::new(
-                area.x + cursor_x.min(area.width.saturating_sub(2)),
-                area.y + 1,
+                area.x + cursor_x.min(area.width.saturating_sub(1)),
+                area.y,
             ));
         }
     }
@@ -1492,7 +1471,7 @@ impl RequestPane {
             yinx_core::request::Method::Patch => theme.semantic.warning.as_color(),
             yinx_core::request::Method::Delete => theme.semantic.error.as_color(),
             yinx_core::request::Method::Head => theme.semantic.info.as_color(),
-            yinx_core::request::Method::Options => ratatui::style::Color::Magenta,
+            yinx_core::request::Method::Options => theme.semantic.info.as_color(),
         }
     }
 
@@ -1732,25 +1711,24 @@ impl RequestPane {
         let url_focused = is_active && self.focused_field == FocusedField::Url;
 
         let method_color = self.method_theme_color(theme);
-        let border_color = if method_focused || url_focused {
-            theme.border.active_color.as_color()
+        let bar_bg = if is_active && (method_focused || url_focused) {
+            theme.bg_element()
         } else {
-            theme.dim_border_color()
+            theme.pane_bg(is_active)
         };
-
-        let bar_bg = theme.subtle_bg();
-
-        // Single continuous bar
-        let bar_block = Block::default()
-            .borders(Borders::ALL)
-            .border_type(theme.tui_border_type())
-            .border_style(Style::default().fg(border_color))
-            .style(Style::default().bg(bar_bg));
 
         let url_display = if self.url_buffer.as_str().is_empty() {
             "Paste or type a URL..."
         } else {
             self.url_buffer.as_str()
+        };
+
+        let url_style = if self.url_buffer.as_str().is_empty() {
+            theme.placeholder_color()
+        } else if url_focused {
+            theme.foreground.as_color()
+        } else {
+            theme.text_muted()
         };
 
         let bar_content = Line::from(vec![
@@ -1760,35 +1738,24 @@ impl RequestPane {
                     .fg(method_color)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(
-                " ▼  ",
-                Style::default().fg(theme.typography_level(3).0),
-            ),
-            Span::styled(
-                url_display,
-                Style::default().fg(if self.url_buffer.as_str().is_empty() {
-                    theme.placeholder_color()
-                } else {
-                    theme.foreground.as_color()
-                }),
-            ),
+            Span::styled("  ", Style::default().fg(theme.text_muted())),
+            Span::styled(url_display, Style::default().fg(url_style)),
         ]);
 
         let bar_para = Paragraph::new(bar_content)
-            .block(bar_block)
-            .style(Style::default().bg(bar_bg))
+            .style(Style::default().bg(bar_bg).fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: true });
         frame.render_widget(bar_para, area);
 
         if url_focused {
-            let mut cursor_x = 1u16;
-            let method_part = format!(" {}  ▼  ", self.method.as_str());
+            let mut cursor_x = 0u16;
+            let method_part = format!(" {}  ", self.method.as_str());
             let url_prefix = &self.url_buffer.as_str()[..self.url_buffer.cursor_pos];
             cursor_x = cursor_x.saturating_add(method_part.chars().count() as u16);
             cursor_x = cursor_x.saturating_add(url_prefix.chars().count() as u16);
             frame.set_cursor_position(ratatui::prelude::Position::new(
-                area.x + cursor_x.min(area.width.saturating_sub(2)),
-                area.y + 1,
+                area.x + cursor_x.min(area.width.saturating_sub(1)),
+                area.y,
             ));
         }
     }
@@ -1885,15 +1852,11 @@ impl RequestPane {
         )
         .header(header)
         .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(
-                    Style::default()
-                        .bg(theme.pane_bg(is_active))
-                        .fg(theme.foreground.as_color()),
-                )
-                .title(" HEADERS  a add  d delete "),
+            Block::default().style(
+                Style::default()
+                    .bg(theme.pane_bg(is_active))
+                    .fg(theme.foreground.as_color()),
+            ),
         )
         .row_highlight_style(
             Style::default()
@@ -1928,15 +1891,9 @@ impl RequestPane {
         };
 
         let type_para = Paragraph::new(Line::from(vec![
-            Span::styled(format!("BODY TYPE {}", body_type_str), type_style),
-            Span::raw("  t cycle"),
+            Span::styled(format!("BODY TYPE {}  t cycle", body_type_str), type_style),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(Style::default().bg(theme.subtle_bg())),
-        );
+        .style(Style::default().bg(theme.bg_element()).fg(theme.text_muted()));
 
         frame.render_widget(type_para, chunks[0]);
 
@@ -1945,21 +1902,10 @@ impl RequestPane {
                 .fg(theme.highlight.selected_fg.as_color())
                 .bg(theme.highlight.selected_bg.as_color())
         } else {
-            Style::default().fg(theme.highlight.fg.as_color())
+            Style::default().fg(theme.foreground.as_color()).bg(theme.pane_bg(is_active))
         };
 
         let body_para = Paragraph::new(self.body_content.as_str())
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme.border.color.as_color()))
-                    .style(
-                        Style::default()
-                            .bg(theme.highlight.bg.as_color())
-                            .fg(theme.highlight.fg.as_color()),
-                    )
-                    .title(" BODY "),
-            )
             .style(content_style)
             .wrap(Wrap { trim: false });
 
@@ -1997,40 +1943,20 @@ impl RequestPane {
             Span::styled(
                 "Type: ",
                 Style::default()
-                    .fg(theme.pane.title.as_color())
+                    .fg(theme.section_title())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(auth_type_str, type_style),
-            Span::raw(" (press 't' to change)"),
+            Span::styled("  t cycle", Style::default().fg(theme.text_muted())),
         ]))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(
-                    Style::default()
-                        .bg(theme.pane.bg_color())
-                        .fg(theme.foreground.as_color()),
-                )
-                .title("Authentication"),
-        );
+        .style(Style::default().bg(theme.pane_bg(is_active)).fg(theme.foreground.as_color()));
 
         frame.render_widget(type_para, chunks[0]);
 
         match self.auth_type {
             AuthType::None => {
                 let para = Paragraph::new("No authentication configured")
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(Style::default().fg(theme.border.color.as_color()))
-                            .style(
-                                Style::default()
-                                    .bg(theme.pane.bg_color())
-                                    .fg(theme.foreground.as_color()),
-                            ),
-                    )
-                    .style(Style::default().fg(theme.foreground.as_color()));
+                    .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(is_active)));
                 frame.render_widget(para, chunks[1]);
             }
             AuthType::Basic => {
@@ -2044,7 +1970,7 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.foreground.as_color())
+                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
                 };
 
                 let pass_style = if is_focused && self.auth_field_focus == AuthField::Password {
@@ -2052,68 +1978,44 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.foreground.as_color())
+                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
                 };
 
-                let user_para = Paragraph::new(self.auth_username.as_str())
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(
-                                if is_focused && self.auth_field_focus == AuthField::Username {
-                                    Style::default().fg(theme.border.active_color.as_color())
-                                } else {
-                                    Style::default().fg(theme.border.color.as_color())
-                                },
-                            )
-                            .style(
-                                Style::default()
-                                    .bg(theme.highlight.bg.as_color())
-                                    .fg(theme.highlight.fg.as_color()),
-                            )
-                            .title("Username"),
-                    )
+                let user_line = Line::from(vec![
+                    Span::styled("Username ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(self.auth_username.as_str(), Style::default()),
+                ]);
+                let user_para = Paragraph::new(user_line)
                     .style(user_style);
-
                 frame.render_widget(user_para, inner_chunks[0]);
 
-                let pass_para = Paragraph::new(self.auth_password.as_str())
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(
-                                if is_focused && self.auth_field_focus == AuthField::Password {
-                                    Style::default().fg(theme.border.active_color.as_color())
-                                } else {
-                                    Style::default().fg(theme.border.color.as_color())
-                                },
-                            )
-                            .style(
-                                Style::default()
-                                    .bg(theme.highlight.bg.as_color())
-                                    .fg(theme.highlight.fg.as_color()),
-                            )
-                            .title("Password"),
-                    )
+                let pass_line = Line::from(vec![
+                    Span::styled("Password ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(self.auth_password.as_str(), Style::default()),
+                ]);
+                let pass_para = Paragraph::new(pass_line)
                     .style(pass_style);
-
                 frame.render_widget(pass_para, inner_chunks[1]);
 
                 if is_focused && self.auth_field_focus == AuthField::Username {
-                    let x_offset = self.auth_username.as_str()[..self.auth_username.cursor_pos]
-                        .chars()
-                        .count() as u16;
+                    let prefix = "Username ";
+                    let x_offset = prefix.chars().count() as u16
+                        + self.auth_username.as_str()[..self.auth_username.cursor_pos]
+                            .chars()
+                            .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
-                        inner_chunks[0].x + 1 + x_offset,
-                        inner_chunks[0].y + 1,
+                        inner_chunks[0].x + x_offset.min(inner_chunks[0].width.saturating_sub(1)),
+                        inner_chunks[0].y,
                     ));
                 } else if is_focused && self.auth_field_focus == AuthField::Password {
-                    let x_offset = self.auth_password.as_str()[..self.auth_password.cursor_pos]
-                        .chars()
-                        .count() as u16;
+                    let prefix = "Password ";
+                    let x_offset = prefix.chars().count() as u16
+                        + self.auth_password.as_str()[..self.auth_password.cursor_pos]
+                            .chars()
+                            .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
-                        inner_chunks[1].x + 1 + x_offset,
-                        inner_chunks[1].y + 1,
+                        inner_chunks[1].x + x_offset.min(inner_chunks[1].width.saturating_sub(1)),
+                        inner_chunks[1].y,
                     ));
                 }
             }
@@ -2123,38 +2025,26 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.foreground.as_color())
+                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
                 };
 
-                let token_para = Paragraph::new(self.auth_token.as_str())
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(
-                                if is_focused && self.auth_field_focus == AuthField::Token {
-                                    Style::default().fg(theme.border.active_color.as_color())
-                                } else {
-                                    Style::default().fg(theme.border.color.as_color())
-                                },
-                            )
-                            .style(
-                                Style::default()
-                                    .bg(theme.highlight.bg.as_color())
-                                    .fg(theme.highlight.fg.as_color()),
-                            )
-                            .title("Bearer Token"),
-                    )
+                let token_line = Line::from(vec![
+                    Span::styled("Bearer Token ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(self.auth_token.as_str(), Style::default()),
+                ]);
+                let token_para = Paragraph::new(token_line)
                     .style(token_style);
-
                 frame.render_widget(token_para, chunks[1]);
 
                 if is_focused && self.auth_field_focus == AuthField::Token {
-                    let x_offset = self.auth_token.as_str()[..self.auth_token.cursor_pos]
-                        .chars()
-                        .count() as u16;
+                    let prefix = "Bearer Token ";
+                    let x_offset = prefix.chars().count() as u16
+                        + self.auth_token.as_str()[..self.auth_token.cursor_pos]
+                            .chars()
+                            .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
-                        chunks[1].x + 1 + x_offset,
-                        chunks[1].y + 1,
+                        chunks[1].x + x_offset.min(chunks[1].width.saturating_sub(1)),
+                        chunks[1].y,
                     ));
                 }
             }
@@ -2169,7 +2059,7 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.foreground.as_color())
+                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
                 };
 
                 let value_style = if is_focused && self.auth_field_focus == AuthField::KeyValue {
@@ -2177,68 +2067,42 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.foreground.as_color())
+                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
                 };
 
-                let key_para = Paragraph::new(self.auth_key_name.as_str())
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(
-                                if is_focused && self.auth_field_focus == AuthField::KeyName {
-                                    Style::default().fg(theme.border.active_color.as_color())
-                                } else {
-                                    Style::default().fg(theme.border.color.as_color())
-                                },
-                            )
-                            .style(
-                                Style::default()
-                                    .bg(theme.highlight.bg.as_color())
-                                    .fg(theme.highlight.fg.as_color()),
-                            )
-                            .title("Key Name"),
-                    )
-                    .style(key_style);
-
+                let key_line = Line::from(vec![
+                    Span::styled("Key Name ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(self.auth_key_name.as_str(), Style::default()),
+                ]);
+                let key_para = Paragraph::new(key_line).style(key_style);
                 frame.render_widget(key_para, inner_chunks[0]);
 
-                let value_para = Paragraph::new(self.auth_key_value.as_str())
-                    .block(
-                        Block::default()
-                            .borders(Borders::ALL)
-                            .border_style(
-                                if is_focused && self.auth_field_focus == AuthField::KeyValue {
-                                    Style::default().fg(theme.border.active_color.as_color())
-                                } else {
-                                    Style::default().fg(theme.border.color.as_color())
-                                },
-                            )
-                            .style(
-                                Style::default()
-                                    .bg(theme.highlight.bg.as_color())
-                                    .fg(theme.highlight.fg.as_color()),
-                            )
-                            .title("Key Value"),
-                    )
-                    .style(value_style);
-
+                let value_line = Line::from(vec![
+                    Span::styled("Key Value ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(self.auth_key_value.as_str(), Style::default()),
+                ]);
+                let value_para = Paragraph::new(value_line).style(value_style);
                 frame.render_widget(value_para, inner_chunks[1]);
 
                 if is_focused && self.auth_field_focus == AuthField::KeyName {
-                    let x_offset = self.auth_key_name.as_str()[..self.auth_key_name.cursor_pos]
-                        .chars()
-                        .count() as u16;
+                    let prefix = "Key Name ";
+                    let x_offset = prefix.chars().count() as u16
+                        + self.auth_key_name.as_str()[..self.auth_key_name.cursor_pos]
+                            .chars()
+                            .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
-                        inner_chunks[0].x + 1 + x_offset,
-                        inner_chunks[0].y + 1,
+                        inner_chunks[0].x + x_offset.min(inner_chunks[0].width.saturating_sub(1)),
+                        inner_chunks[0].y,
                     ));
                 } else if is_focused && self.auth_field_focus == AuthField::KeyValue {
-                    let x_offset = self.auth_key_value.as_str()[..self.auth_key_value.cursor_pos]
-                        .chars()
-                        .count() as u16;
+                    let prefix = "Key Value ";
+                    let x_offset = prefix.chars().count() as u16
+                        + self.auth_key_value.as_str()[..self.auth_key_value.cursor_pos]
+                            .chars()
+                            .count() as u16;
                     frame.set_cursor_position(ratatui::prelude::Position::new(
-                        inner_chunks[1].x + 1 + x_offset,
-                        inner_chunks[1].y + 1,
+                        inner_chunks[1].x + x_offset.min(inner_chunks[1].width.saturating_sub(1)),
+                        inner_chunks[1].y,
                     ));
                 }
             }
@@ -2300,15 +2164,11 @@ impl RequestPane {
         )
         .header(header)
         .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme.border.color.as_color()))
-                .style(
-                    Style::default()
-                        .bg(theme.pane.bg_color())
-                        .fg(theme.foreground.as_color()),
-                )
-                .title("Query Parameters (a=add, d=delete, ←→ to switch field)"),
+            Block::default().style(
+                Style::default()
+                    .bg(theme.pane_bg(is_active))
+                    .fg(theme.foreground.as_color()),
+            ),
         )
         .row_highlight_style(
             Style::default()
