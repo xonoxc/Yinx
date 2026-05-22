@@ -445,8 +445,14 @@ impl ResponsePane {
         }
 
         let scroll_bottom = self.scroll_offset + viewport;
-        if self.cursor_line + self.scrolloff >= scroll_bottom && self.cursor_line + self.scrolloff < total {
-            self.scroll_offset = self.cursor_line.saturating_add(self.scrolloff).saturating_sub(viewport).min(total.saturating_sub(viewport));
+        if self.cursor_line + self.scrolloff >= scroll_bottom
+            && self.cursor_line + self.scrolloff < total
+        {
+            self.scroll_offset = self
+                .cursor_line
+                .saturating_add(self.scrolloff)
+                .saturating_sub(viewport)
+                .min(total.saturating_sub(viewport));
         }
 
         if self.cursor_line > total.saturating_sub(self.scrolloff + 1) {
@@ -490,9 +496,13 @@ impl ResponsePane {
 
         let bg = theme.pane_bg(is_active);
         let inner = {
-            let has_title = self.response.is_some() || self.error.is_some();
-            let title_height = if has_title { 1u16 } else { 0u16 };
-            let inner_area = Rect::new(area.x, area.y + title_height, area.width, area.height.saturating_sub(title_height));
+            let title_height = 1u16;
+            let inner_area = Rect::new(
+                area.x,
+                area.y + title_height,
+                area.width,
+                area.height.saturating_sub(title_height),
+            );
             inner_area
         };
         let inner_height = inner.height as usize;
@@ -504,32 +514,45 @@ impl ResponsePane {
         );
 
         // Title line
-        if self.response.is_some() || self.error.is_some() {
-            let title = self.build_title(theme);
-            let title_area = Rect::new(area.x + 2, area.y, area.width.saturating_sub(2), 1);
-            frame.render_widget(
-                Paragraph::new(title).style(Style::default().bg(bg).fg(theme.foreground.as_color())),
-                title_area,
-            );
-        }
+        let title = self.build_title(theme);
+        let title_area = Rect::new(area.x + 2, area.y, area.width.saturating_sub(2), 1);
+        frame.render_widget(
+            Paragraph::new(title).style(Style::default().bg(bg).fg(theme.foreground.as_color())),
+            title_area,
+        );
 
         if self.lines_cache.is_empty() && !self.has_content() {
             let empty_lines = vec![
                 Line::from(Span::styled(
                     " No request executed ",
-                    Style::default().fg(theme.placeholder_color()),
+                    Style::default()
+                        .fg(theme.typography_level(1).0)
+                        .add_modifier(Modifier::BOLD),
                 )),
-                Line::from(Span::styled(
-                    "",
-                    Style::default(),
-                )),
+                Line::from(Span::styled("", Style::default())),
                 Line::from(vec![
-                    Span::styled(" Ctrl+Enter ", Style::default().fg(theme.semantic.success.as_color()).add_modifier(Modifier::BOLD)),
-                    Span::styled("→ Send request", Style::default().fg(theme.typography_level(3).0)),
+                    Span::styled(
+                        " Ctrl+R ",
+                        Style::default()
+                            .fg(theme.semantic.success.as_color())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "→ Send request",
+                        Style::default().fg(theme.typography_level(2).0),
+                    ),
                 ]),
                 Line::from(vec![
-                    Span::styled(" Tab ", Style::default().fg(theme.semantic.info.as_color()).add_modifier(Modifier::BOLD)),
-                    Span::styled("→ Cycle panes", Style::default().fg(theme.typography_level(3).0)),
+                    Span::styled(
+                        " Tab ",
+                        Style::default()
+                            .fg(theme.semantic.info.as_color())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "→ Cycle panes",
+                        Style::default().fg(theme.typography_level(2).0),
+                    ),
                 ]),
                 Line::from(Span::styled("", Style::default())),
                 Line::from(Span::styled(
@@ -538,7 +561,7 @@ impl ResponsePane {
                 )),
                 Line::from(Span::styled(
                     "  (no history yet)",
-                    Style::default().fg(theme.typography_level(3).0),
+                    Style::default().fg(theme.typography_level(2).0),
                 )),
             ];
             let placeholder = Paragraph::new(empty_lines)
@@ -727,9 +750,13 @@ impl ResponsePane {
         for y in 0..inner.height {
             let is_thumb = y >= thumb_pos && y < thumb_pos + thumb_height;
             let style = if is_thumb {
-                Style::default().fg(theme.semantic.info.as_color()).bg(theme.pane_bg(true))
+                Style::default()
+                    .fg(theme.semantic.info.as_color())
+                    .bg(theme.pane_bg(true))
             } else {
-                Style::default().fg(theme.muted_color()).bg(theme.pane_bg(false))
+                Style::default()
+                    .fg(theme.muted_color())
+                    .bg(theme.pane_bg(false))
             };
             let ch = if is_thumb { "▐" } else { "·" };
             scrollbar_chars.push(Line::from(Span::styled(ch, style)));
@@ -859,17 +886,11 @@ impl ResponsePane {
                     }
                 }
                 ',' => {
-                    spans.push(Span::styled(
-                        ",",
-                        Style::default().fg(theme.muted_color()),
-                    ));
+                    spans.push(Span::styled(",", Style::default().fg(theme.muted_color())));
                     i += 1;
                 }
                 ':' => {
-                    spans.push(Span::styled(
-                        ": ",
-                        Style::default().fg(theme.muted_color()),
-                    ));
+                    spans.push(Span::styled(": ", Style::default().fg(theme.muted_color())));
                     i += 1;
                 }
                 '{' | '}' | '[' | ']' => {

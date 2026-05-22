@@ -442,6 +442,7 @@ impl Sidebar {
                     ListItem::new(Line::from(Span::styled(
                         format!(" {} {} ", icon, name),
                         Style::default()
+                            .bg(theme.bg_element())
                             .fg(theme.section_title())
                             .add_modifier(Modifier::BOLD),
                     )))
@@ -453,7 +454,11 @@ impl Sidebar {
                         "▾"
                     };
                     ListItem::new(Line::from(Span::styled(
-                        format!("  {} {} ", icon, truncate_text(name, line_width.saturating_sub(4))),
+                        format!(
+                            "  {} {} ",
+                            icon,
+                            truncate_text(name, line_width.saturating_sub(4))
+                        ),
                         Style::default().fg(theme.semantic.info.as_color()),
                     )))
                 }
@@ -489,7 +494,11 @@ impl Sidebar {
                 SidebarItem::Environment { name, active, .. } => {
                     let indicator = if *active { "●" } else { "○" };
                     ListItem::new(Line::from(Span::styled(
-                        format!("  {} {} ", indicator, truncate_text(name, line_width.saturating_sub(6))),
+                        format!(
+                            "  {} {} ",
+                            indicator,
+                            truncate_text(name, line_width.saturating_sub(6))
+                        ),
                         Style::default().fg(if *active {
                             theme.semantic.success.as_color()
                         } else {
@@ -538,10 +547,7 @@ impl Sidebar {
                                     .fg(status_color)
                                     .add_modifier(Modifier::BOLD),
                             ),
-                            Span::styled(
-                                time_ago,
-                                Style::default().fg(theme.muted_color()),
-                            ),
+                            Span::styled(time_ago, Style::default().fg(theme.muted_color())),
                         ]),
                         Line::from(Span::styled(
                             format!("  {}", url_display),

@@ -704,6 +704,13 @@ mod tests {
         assert_eq!(h, 40);
     }
 
+    #[test]
+    fn test_workspace_layout_uses_classic_chrome_heights() {
+        let layout = WorkspaceLayout::default();
+        assert_eq!(layout.tab_bar_height, 2);
+        assert_eq!(layout.status_bar_height, 3);
+    }
+
     // Task 8.1
     #[test]
     fn test_layout_preset_variants() {

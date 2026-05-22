@@ -180,7 +180,7 @@ impl TuiShell {
         );
         logs_pane.add_log(
             LogLevel::Info,
-            "Ctrl+Enter sends, Tab cycles panes, Esc leaves insert mode.",
+            "Ctrl+R sends, Tab cycles panes, Esc leaves insert mode.",
         );
 
         let mut theme_registry = ThemeRegistry::with_defaults();
@@ -313,6 +313,18 @@ impl TuiShell {
             && key_event.code == KeyCode::Char('c')
         {
             self.should_quit = true;
+            return Ok(());
+        }
+
+        // Catch Ctrl+R directly so it always sends the request
+        // regardless of InputHandler mode or terminal modifier quirks.
+        if key_event.code == KeyCode::Char('r')
+            && key_event.modifiers.contains(KeyModifiers::CONTROL)
+        {
+            if let Err(e) = self.execute_request().await {
+                self.logs_pane.add_log(LogLevel::Error, e.to_string());
+                self.response_pane.set_error(e.to_string());
+            }
             return Ok(());
         }
 
@@ -874,12 +886,14 @@ impl TuiShell {
 
         // Sidebar
         if wrects.sidebar.width > 0 {
+            let (sidebar_area, sidebar_divider) = reserve_right_divider(wrects.sidebar);
             self.sidebar.render(
                 frame,
-                wrects.sidebar,
+                sidebar_area,
                 &self.theme,
                 self.active_pane == ActivePane::Sidebar,
             );
+            render_vertical_divider(frame, sidebar_divider, &self.theme);
         }
 
         // Tab bar
@@ -892,21 +906,25 @@ impl TuiShell {
         );
 
         // Request pane (compact)
+        let (request_area, request_divider) = reserve_bottom_divider(wrects.center_top);
         self.request_pane.set_compact(true);
         self.request_pane.render_compact(
             frame,
-            wrects.center_top,
+            request_area,
             &self.theme,
             self.active_pane == ActivePane::Request,
         );
+        render_horizontal_divider(frame, request_divider, &self.theme);
 
         let (response_area, logs_area) = split_response_logs(wrects.center_bottom);
+        let (response_content, response_divider) = reserve_bottom_divider(response_area);
         self.response_pane.render(
             frame,
-            response_area,
+            response_content,
             &self.theme,
             self.active_pane == ActivePane::Response,
         );
+        render_horizontal_divider(frame, response_divider, &self.theme);
 
         if let Some(logs_area) = logs_area {
             self.logs_pane.render(
@@ -1029,7 +1047,7 @@ impl TuiShell {
                 "Actions",
                 Style::default().add_modifier(Modifier::BOLD),
             )]),
-            Line::from("  Space / Ctrl+Enter  Send request"),
+            Line::from("  Ctrl+R  Send request"),
             Line::from("  Ctrl+N              New tab"),
             Line::from("  dd                  Delete item (list) / Delete line"),
             Line::from("  gd                  Go to definition"),
@@ -1109,6 +1127,28 @@ fn centered_rect(area: Rect, width_percent: u16, height_percent: u16) -> Rect {
     Rect::new(x, y, width.max(1), height.max(1))
 }
 
+fn reserve_bottom_divider(area: Rect) -> (Rect, Rect) {
+    if area.height <= 1 {
+        return (area, Rect::new(area.x, area.y, area.width, 0));
+    }
+
+    (
+        Rect::new(area.x, area.y, area.width, area.height - 1),
+        Rect::new(area.x, area.y + area.height - 1, area.width, 1),
+    )
+}
+
+fn reserve_right_divider(area: Rect) -> (Rect, Rect) {
+    if area.width <= 1 {
+        return (area, Rect::new(area.x, area.y, 0, area.height));
+    }
+
+    (
+        Rect::new(area.x, area.y, area.width - 1, area.height),
+        Rect::new(area.x + area.width - 1, area.y, 1, area.height),
+    )
+}
+
 fn split_response_logs(area: Rect) -> (Rect, Option<Rect>) {
     if area.width < 64 || area.height < 10 {
         return (area, None);
@@ -1129,6 +1169,26 @@ fn split_response_logs(area: Rect) -> (Rect, Option<Rect>) {
         .split(area);
 
     (chunks[0], Some(chunks[1]))
+}
+
+fn render_horizontal_divider(frame: &mut ratatui::Frame<'_>, area: Rect, theme: &Theme) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let line = "─".repeat(area.width as usize);
+    let divider = Paragraph::new(line).style(Style::default().fg(theme.dim_border_color()));
+    frame.render_widget(divider, area);
+}
+
+fn render_vertical_divider(frame: &mut ratatui::Frame<'_>, area: Rect, theme: &Theme) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    let divider = Paragraph::new(vec![Line::from("│"); area.height as usize])
+        .style(Style::default().fg(theme.dim_border_color()));
+    frame.render_widget(divider, area);
 }
 
 pub struct EventLoop {

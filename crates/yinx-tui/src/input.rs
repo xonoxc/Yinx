@@ -342,7 +342,7 @@ impl KeyBindingConfig {
         bindings.insert(KeyBinding::new("w", &["Ctrl"]), KeyAction::DeleteWord);
 
         // Actions
-        bindings.insert(KeyBinding::new("Enter", &["Ctrl"]), KeyAction::SendRequest);
+        bindings.insert(KeyBinding::new("r", &["Ctrl"]), KeyAction::SendRequest);
         bindings.insert(KeyBinding::new("s", &["Ctrl"]), KeyAction::Save);
 
         // Vim actions
@@ -815,6 +815,10 @@ impl InputHandler {
                             events.push(AppEvent::PaneChanged(yinx_core::state::ActivePane::Logs))
                         }
                         'c' => events.push(AppEvent::Quit),
+                        'r' => {
+                            let action = self.config.get_action(&event);
+                            events.extend(self.apply_action(action));
+                        }
                         _ => return vec![],
                     }
                 } else {
@@ -1489,5 +1493,42 @@ mod tests {
             }
             seen.insert(key);
         }
+    }
+
+    #[test]
+    fn test_ctrl_r_maps_to_send_request_in_normal_mode() {
+        let mut handler = InputHandler::new();
+        let event = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+        let events = handler.handle_key(event);
+        assert!(
+            events.iter().any(|e| matches!(e, AppEvent::ExecuteRequest)),
+            "Ctrl+R in normal mode should produce ExecuteRequest, got {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn test_ctrl_r_maps_to_send_request_in_insert_mode() {
+        let mut handler = InputHandler::new();
+        handler.switch_mode(InputMode::Insert);
+        let event = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+        let events = handler.handle_key(event);
+        assert!(
+            events.iter().any(|e| matches!(e, AppEvent::ExecuteRequest)),
+            "Ctrl+R in insert mode should produce ExecuteRequest, got {:?}",
+            events
+        );
+    }
+
+    #[test]
+    fn test_plain_r_in_normal_mode_does_not_send_request() {
+        let mut handler = InputHandler::new();
+        let event = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE);
+        let events = handler.handle_key(event);
+        assert!(
+            !events.iter().any(|e| matches!(e, AppEvent::ExecuteRequest)),
+            "Plain 'r' in normal mode should NOT produce ExecuteRequest, got {:?}",
+            events
+        );
     }
 }

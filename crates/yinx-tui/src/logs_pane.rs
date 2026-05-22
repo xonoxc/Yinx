@@ -4,12 +4,9 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{
-        BarChart, Block, List, ListItem, ListState, Paragraph, Tabs, Wrap,
-    },
+    widgets::{BarChart, Block, List, ListItem, ListState, Paragraph, Tabs, Wrap},
     Frame,
 };
-
 
 use std::collections::VecDeque;
 
@@ -438,6 +435,13 @@ impl LogsPane {
             .unwrap_or_else(|| "No activity yet".to_string());
         let summary = Line::from(vec![
             Span::styled(
+                "ACTIVITY",
+                Style::default()
+                    .fg(theme.section_title())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" │ ", Style::default().fg(theme.muted_color())),
+            Span::styled(
                 format!("{} logs", self.log_count()),
                 Style::default()
                     .fg(theme.typography_level(1).0)
@@ -799,7 +803,11 @@ impl LogsPane {
         }
 
         let paragraph = Paragraph::new(lines)
-            .style(Style::default().bg(theme.pane_bg(false)).fg(theme.foreground.as_color()))
+            .style(
+                Style::default()
+                    .bg(theme.pane_bg(false))
+                    .fg(theme.foreground.as_color()),
+            )
             .wrap(Wrap { trim: true });
 
         frame.render_widget(paragraph, area);
@@ -887,7 +895,11 @@ impl LogsPane {
         } else {
             let paragraph =
                 Paragraph::new("No data available. Send requests to see the histogram.")
-                    .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(false)))
+                    .style(
+                        Style::default()
+                            .fg(theme.text_muted())
+                            .bg(theme.pane_bg(false)),
+                    )
                     .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
@@ -901,7 +913,11 @@ impl LogsPane {
             let paragraph = Paragraph::new(
                 "No request data available. Send requests to see status code distribution.",
             )
-            .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(false)))
+            .style(
+                Style::default()
+                    .fg(theme.text_muted())
+                    .bg(theme.pane_bg(false)),
+            )
             .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
@@ -939,7 +955,11 @@ impl LogsPane {
     fn render_errors(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if self.errors.is_empty() {
             let paragraph = Paragraph::new("No errors logged.")
-                .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(false)))
+                .style(
+                    Style::default()
+                        .fg(theme.text_muted())
+                        .bg(theme.pane_bg(false)),
+                )
                 .alignment(Alignment::Center);
 
             frame.render_widget(paragraph, area);
@@ -1020,7 +1040,11 @@ impl LogsPane {
             let paragraph = Paragraph::new(
                 "No request available. Create a request to see the curl equivalent.",
             )
-            .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(false)))
+            .style(
+                Style::default()
+                    .fg(theme.text_muted())
+                    .bg(theme.pane_bg(false)),
+            )
             .alignment(Alignment::Center);
             frame.render_widget(paragraph, area);
         }

@@ -5,8 +5,7 @@ use ratatui::{
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
-        Tabs, Wrap,
+        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, Tabs, Wrap,
     },
     Frame,
 };
@@ -1431,7 +1430,7 @@ impl RequestPane {
         } else if url_focused {
             theme.foreground.as_color()
         } else {
-            theme.text_muted()
+            theme.typography_level(2).0
         };
 
         let bar_content = Line::from(vec![
@@ -1496,10 +1495,10 @@ impl RequestPane {
                 spans.push(Span::styled(
                     format!(" {} ", title),
                     Style::default()
-                        .fg(if is_tabs_focused {
-                            theme.title_color(true)
+                        .fg(if is_tabs_focused || is_active {
+                            theme.typography_level(1).0
                         } else {
-                            theme.pane.inactive_title.as_color()
+                            theme.typography_level(3).0
                         })
                         .bg(theme.subtle_bg()),
                 ));
@@ -1565,7 +1564,8 @@ impl RequestPane {
         .header(
             Row::new(vec![Cell::from("Key"), Cell::from("Value")]).style(
                 Style::default()
-                    .fg(theme.muted_color())
+                    .bg(theme.bg_element())
+                    .fg(theme.typography_level(1).0)
                     .add_modifier(Modifier::BOLD),
             ),
         )
@@ -1651,7 +1651,8 @@ impl RequestPane {
         .header(
             Row::new(vec![Cell::from("Key"), Cell::from("Value")]).style(
                 Style::default()
-                    .fg(theme.muted_color())
+                    .bg(theme.bg_element())
+                    .fg(theme.typography_level(1).0)
                     .add_modifier(Modifier::BOLD),
             ),
         )
@@ -1890,10 +1891,15 @@ impl RequestPane {
             Style::default().fg(theme.foreground.as_color())
         };
 
-        let type_para = Paragraph::new(Line::from(vec![
-            Span::styled(format!("BODY TYPE {}  t cycle", body_type_str), type_style),
-        ]))
-        .style(Style::default().bg(theme.bg_element()).fg(theme.text_muted()));
+        let type_para = Paragraph::new(Line::from(vec![Span::styled(
+            format!("BODY TYPE {}  t cycle", body_type_str),
+            type_style,
+        )]))
+        .style(
+            Style::default()
+                .bg(theme.bg_element())
+                .fg(theme.typography_level(1).0),
+        );
 
         frame.render_widget(type_para, chunks[0]);
 
@@ -1902,7 +1908,9 @@ impl RequestPane {
                 .fg(theme.highlight.selected_fg.as_color())
                 .bg(theme.highlight.selected_bg.as_color())
         } else {
-            Style::default().fg(theme.foreground.as_color()).bg(theme.pane_bg(is_active))
+            Style::default()
+                .fg(theme.foreground.as_color())
+                .bg(theme.pane_bg(is_active))
         };
 
         let body_para = Paragraph::new(self.body_content.as_str())
@@ -1949,14 +1957,21 @@ impl RequestPane {
             Span::styled(auth_type_str, type_style),
             Span::styled("  t cycle", Style::default().fg(theme.text_muted())),
         ]))
-        .style(Style::default().bg(theme.pane_bg(is_active)).fg(theme.foreground.as_color()));
+        .style(
+            Style::default()
+                .bg(theme.pane_bg(is_active))
+                .fg(theme.foreground.as_color()),
+        );
 
         frame.render_widget(type_para, chunks[0]);
 
         match self.auth_type {
             AuthType::None => {
-                let para = Paragraph::new("No authentication configured")
-                    .style(Style::default().fg(theme.text_muted()).bg(theme.pane_bg(is_active)));
+                let para = Paragraph::new("No authentication configured").style(
+                    Style::default()
+                        .fg(theme.typography_level(2).0)
+                        .bg(theme.pane_bg(is_active)),
+                );
                 frame.render_widget(para, chunks[1]);
             }
             AuthType::Basic => {
@@ -1970,7 +1985,9 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
+                    Style::default()
+                        .fg(theme.foreground.as_color())
+                        .bg(theme.bg_element())
                 };
 
                 let pass_style = if is_focused && self.auth_field_focus == AuthField::Password {
@@ -1978,23 +1995,33 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
+                    Style::default()
+                        .fg(theme.foreground.as_color())
+                        .bg(theme.bg_element())
                 };
 
                 let user_line = Line::from(vec![
-                    Span::styled("Username ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Username ",
+                        Style::default()
+                            .fg(theme.section_title())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(self.auth_username.as_str(), Style::default()),
                 ]);
-                let user_para = Paragraph::new(user_line)
-                    .style(user_style);
+                let user_para = Paragraph::new(user_line).style(user_style);
                 frame.render_widget(user_para, inner_chunks[0]);
 
                 let pass_line = Line::from(vec![
-                    Span::styled("Password ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Password ",
+                        Style::default()
+                            .fg(theme.section_title())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(self.auth_password.as_str(), Style::default()),
                 ]);
-                let pass_para = Paragraph::new(pass_line)
-                    .style(pass_style);
+                let pass_para = Paragraph::new(pass_line).style(pass_style);
                 frame.render_widget(pass_para, inner_chunks[1]);
 
                 if is_focused && self.auth_field_focus == AuthField::Username {
@@ -2025,15 +2052,21 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
+                    Style::default()
+                        .fg(theme.foreground.as_color())
+                        .bg(theme.bg_element())
                 };
 
                 let token_line = Line::from(vec![
-                    Span::styled("Bearer Token ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Bearer Token ",
+                        Style::default()
+                            .fg(theme.section_title())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(self.auth_token.as_str(), Style::default()),
                 ]);
-                let token_para = Paragraph::new(token_line)
-                    .style(token_style);
+                let token_para = Paragraph::new(token_line).style(token_style);
                 frame.render_widget(token_para, chunks[1]);
 
                 if is_focused && self.auth_field_focus == AuthField::Token {
@@ -2059,7 +2092,9 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
+                    Style::default()
+                        .fg(theme.foreground.as_color())
+                        .bg(theme.bg_element())
                 };
 
                 let value_style = if is_focused && self.auth_field_focus == AuthField::KeyValue {
@@ -2067,18 +2102,30 @@ impl RequestPane {
                         .fg(theme.highlight.selected_fg.as_color())
                         .bg(theme.highlight.selected_bg.as_color())
                 } else {
-                    Style::default().fg(theme.text_muted()).bg(theme.bg_element())
+                    Style::default()
+                        .fg(theme.foreground.as_color())
+                        .bg(theme.bg_element())
                 };
 
                 let key_line = Line::from(vec![
-                    Span::styled("Key Name ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Key Name ",
+                        Style::default()
+                            .fg(theme.section_title())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(self.auth_key_name.as_str(), Style::default()),
                 ]);
                 let key_para = Paragraph::new(key_line).style(key_style);
                 frame.render_widget(key_para, inner_chunks[0]);
 
                 let value_line = Line::from(vec![
-                    Span::styled("Key Value ", Style::default().fg(theme.section_title()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "Key Value ",
+                        Style::default()
+                            .fg(theme.section_title())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(self.auth_key_value.as_str(), Style::default()),
                 ]);
                 let value_para = Paragraph::new(value_line).style(value_style);
