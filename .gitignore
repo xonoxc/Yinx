@@ -5,3 +5,5 @@ Cargo.lock
 PLANS.md
 
 .codex
+
+*.postman_collection.json

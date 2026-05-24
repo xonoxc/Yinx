@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 yinx-core = { path = "../yinx-core" }
 yinx-http = { path = "../yinx-http" }
+yinx-import = { path = "../yinx-import" }
 yinx-storage = { path = "../yinx-storage" }
 yinx-workflow = { path = "../yinx-workflow" }
 ratatui = { workspace = true }

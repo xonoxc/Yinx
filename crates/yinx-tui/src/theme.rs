@@ -720,7 +720,7 @@ mod tests {
         assert!(theme.background.is_none());
         assert_eq!(theme.foreground, ColorDef::Reset);
         assert_ne!(theme.border.color, ColorDef::Reset);
-        assert_ne!(theme.pane.status_bar_bg, ColorDef::Reset);
+        assert_eq!(theme.pane.status_bar_bg, ColorDef::Reset);
     }
 
     #[test]

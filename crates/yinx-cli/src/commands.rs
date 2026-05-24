@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use std::process;
+use yinx_core::collections::Collection;
 use yinx_core::request::{Method, RequestBody, RequestBuilder};
 use yinx_http::client::HttpClient;
 
@@ -393,11 +394,101 @@ async fn import_file(
     file: &str,
     output: Option<String>,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    println!("Importing from: {}", file);
-    if let Some(output) = output {
-        println!("Output to: {}", output);
+    let content = std::fs::read_to_string(file)
+        .map_err(|e| format!("Failed to read '{}': {}", file, e))?;
+
+    let path = std::path::Path::new(file);
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+    let (collection, _source_name) = if ext == "yaml" || ext == "yml" {
+        // OpenAPI / Swagger YAML
+        let requests = yinx_import::openapi::parse_openapi(&content)
+            .map_err(|e| format!("Failed to parse OpenAPI spec: {}", e))?;
+        let mut c = Collection::new(format!("OpenAPI: {}", path.file_stem().unwrap_or_default().to_string_lossy()));
+        for (i, req) in requests.into_iter().enumerate() {
+            let saved = yinx_core::state::SavedRequest {
+                id: uuid::Uuid::new_v4().to_string(),
+                name: format!("{} {}", req.method, req.url.as_str()),
+                request: req,
+                tags: Vec::new(),
+            };
+            if i == 0 { println!("  {} {}", saved.request.method, saved.request.url.as_str()); }
+            c.add_item(yinx_core::collections::CollectionItem::Request(Box::new(saved)));
+        }
+        println!("Imported {} request(s) from OpenAPI spec", c.item_count());
+        (c, "OpenAPI".to_string())
+    } else if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+        if json.get("__export_format").is_some() || json.get("resources").is_some() {
+            // Insomnia
+            let requests = yinx_import::insomnia::parse_insomnia_export(&content)
+                .map_err(|e| format!("Failed to parse Insomnia export: {}", e))?;
+            let mut c = Collection::new(format!("Insomnia: {}", path.file_stem().unwrap_or_default().to_string_lossy()));
+            for (i, req) in requests.into_iter().enumerate() {
+                let saved = yinx_core::state::SavedRequest {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    name: format!("Request {}", i),
+                    request: req,
+                    tags: Vec::new(),
+                };
+                if i == 0 { println!("  {} {}", saved.request.method, saved.request.url.as_str()); }
+                c.add_item(yinx_core::collections::CollectionItem::Request(Box::new(saved)));
+            }
+            println!("Imported {} request(s) from Insomnia", c.item_count());
+            (c, "Insomnia".to_string())
+        } else if json.get("info").and_then(|i| i.get("schema")).is_some() {
+            // Postman
+            let (collection, warnings) = yinx_import::postman::parse_collection_to_collection(&content)
+                .map_err(|e| format!("Failed to parse Postman collection: {}", e))?;
+            for w in &warnings {
+                eprintln!("Warning: {}", w);
+            }
+            for sr in collection.flatten_requests() {
+                println!("  {} {} — {}", sr.request.method, sr.request.url.as_str(), sr.name);
+            }
+            let count = collection.item_count();
+            println!("Imported {} request(s) from Postman collection '{}'", count, collection.name);
+            (collection, "Postman".to_string())
+        } else {
+            return Err(format!("Unrecognized JSON format in '{}'. Expected a Postman collection, Insomnia export, or OpenAPI spec.", file).into());
+        }
+    } else {
+        // Try as curl command
+        let request = yinx_import::curl::parse_curl(&content)
+            .map_err(|e| format!("Failed to parse curl command: {:?}", e))?;
+        let mut c = Collection::new(format!("curl: {}", path.file_stem().unwrap_or_default().to_string_lossy()));
+        let saved = yinx_core::state::SavedRequest {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: format!("{} {}", request.method, request.url.as_str()),
+            request,
+            tags: Vec::new(),
+        };
+        println!("  {} {}", saved.request.method, saved.request.url.as_str());
+        c.add_item(yinx_core::collections::CollectionItem::Request(Box::new(saved)));
+        println!("Imported 1 request from curl command");
+        (c, "curl".to_string())
+    };
+
+    if let Some(output_path) = output {
+        let json = serde_json::to_string_pretty(&collection)?;
+        std::fs::write(&output_path, json)
+            .map_err(|e| format!("Failed to write output to '{}': {}", output_path, e))?;
+        println!("Saved collection to {}", output_path);
+    } else {
+        let default_dir = std::path::PathBuf::from(
+            &std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
+        )
+        .join(".local")
+        .join("share")
+        .join("yinx")
+        .join("collections");
+        std::fs::create_dir_all(&default_dir)?;
+        let output_path = default_dir.join(format!("{}.json", collection.id));
+        let json = serde_json::to_string_pretty(&collection)?;
+        std::fs::write(&output_path, json)
+            .map_err(|e| format!("Failed to save collection: {}", e))?;
+        println!("Saved collection to {}", output_path.display());
     }
-    println!("Import functionality is being implemented...");
+
     Ok(0)
 }
 

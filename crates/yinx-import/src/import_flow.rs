@@ -68,8 +68,16 @@ pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, Stri
             Ok(preview)
         }
         ImportSource::Postman(json) => {
-            let (collection, _warnings) = super::postman::parse_collection_to_collection(&json)
-                .map_err(|e| format!("{}", e))?;
+            let (collection, raw_warnings) =
+                super::postman::parse_collection_to_collection(&json)
+                    .map_err(|e| format!("{}", e))?;
+            let warnings: Vec<ImportWarning> = raw_warnings
+                .into_iter()
+                .map(|w| ImportWarning {
+                    message: w,
+                    item_index: None,
+                })
+                .collect();
             let items: Vec<ImportItem> = collection
                 .flatten_requests()
                 .into_iter()
@@ -82,7 +90,7 @@ pub fn create_import_preview(source: ImportSource) -> Result<ImportPreview, Stri
             let mut preview = ImportPreview {
                 items,
                 selected: HashSet::new(),
-                warnings: vec![],
+                warnings,
                 errors: vec![],
             };
             for i in 0..preview.items.len() {

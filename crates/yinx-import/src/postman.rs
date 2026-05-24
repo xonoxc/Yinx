@@ -64,6 +64,10 @@ pub enum PostmanUrl {
         path: Vec<String>,
         #[serde(default)]
         query: Vec<PostmanQueryParam>,
+        #[serde(default)]
+        protocol: Option<String>,
+        #[serde(default)]
+        port: Option<String>,
     },
 }
 
@@ -177,7 +181,7 @@ fn convert_request(
             "raw" => {
                 if let Some(raw) = body.raw {
                     let raw = replace_variables(&raw, variables);
-                    if headers.get("content-type") == Some("application/json") {
+                    if is_json_content_type(headers.get("content-type")) {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
                             RequestBody::Json(json)
                         } else {
@@ -245,14 +249,22 @@ fn resolve_url(url: PostmanUrl, variables: &HashMap<String, String>) -> String {
             host,
             path,
             query,
-            ..
+            protocol,
+            port,
         } => {
             if let Some(raw) = raw {
                 replace_variables(&raw, variables)
+            } else if host.is_empty() {
+                String::new()
             } else {
+                let protocol = protocol.unwrap_or_else(|| "https".to_string());
                 let host_part = host.join(".");
+                let host_part = match port {
+                    Some(p) if !p.is_empty() => format!("{}:{}", host_part, p),
+                    _ => host_part,
+                };
                 let path_part = path.join("/");
-                let mut url = format!("https://{}/{}", host_part, path_part);
+                let mut url = format!("{}://{}/{}", protocol, host_part, path_part);
                 if !query.is_empty() {
                     let query_str: Vec<String> = query
                         .into_iter()
@@ -264,6 +276,13 @@ fn resolve_url(url: PostmanUrl, variables: &HashMap<String, String>) -> String {
                 replace_variables(&url, variables)
             }
         }
+    }
+}
+
+fn is_json_content_type(value: Option<&str>) -> bool {
+    match value {
+        Some(v) => v.split(';').next().unwrap_or("").trim() == "application/json",
+        None => false,
     }
 }
 
@@ -421,7 +440,7 @@ fn convert_body(
         "raw" => {
             if let Some(raw) = body.raw {
                 let raw = replace_variables(&raw, variables);
-                if headers.get("content-type") == Some("application/json") {
+                if is_json_content_type(headers.get("content-type")) {
                     if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
                         return RequestBody::Json(json);
                     }

@@ -169,6 +169,7 @@ struct TuiShell {
     history: Vec<HistoryEntry>,
     environments: Vec<Environment>,
     active_env_id: Option<String>,
+    import_path: Option<String>,
 }
 
 impl TuiShell {
@@ -223,6 +224,7 @@ impl TuiShell {
             history: Vec::new(),
             environments: Vec::new(),
             active_env_id: None,
+            import_path: None,
         }
     }
 
@@ -333,8 +335,17 @@ impl TuiShell {
             let action = self.command_palette.handle_key(key_event);
             match action {
                 PaletteAction::Execute(events) => {
+                    // Extract any argument after ":import " before hiding the palette
+                    let input = self.command_palette.input.as_str().to_string();
                     self.command_palette.hide();
                     self.input_handler.switch_mode(InputMode::Normal);
+                    if let Some(path) = input
+                        .strip_prefix(":import ")
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                    {
+                        self.import_path = Some(path);
+                    }
                     for evt in events {
                         match evt {
                             AppEvent::Quit => {
@@ -357,8 +368,36 @@ impl TuiShell {
                                 // Remove this once a proper settings screen exists
                                 self.show_help = !self.show_help;
                             }
-                            AppEvent::ImportStarted { .. } => {
-                                self.logs_pane.add_log(LogLevel::Info, "Import triggered");
+                            AppEvent::ImportStarted { source } => {
+                                let path = self.import_path.take().or_else(|| {
+                                    if source != "manual" && !source.is_empty() {
+                                        Some(source.clone())
+                                    } else {
+                                        None
+                                    }
+                                });
+                                match path {
+                                    Some(ref p) if !p.is_empty() => {
+                                        match std::fs::read_to_string(p) {
+                                            Ok(content) => {
+                                                match import_postman_collection(&content, &mut self.tab_manager, &mut self.request_pane, &mut self.logs_pane) {
+                                                    Ok(count) => {
+                                                        self.logs_pane.add_log(LogLevel::Info, format!("Imported {} request(s) from {}", count, p));
+                                                    }
+                                                    Err(e) => {
+                                                        self.logs_pane.add_log(LogLevel::Error, format!("Import failed: {}", e));
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                self.logs_pane.add_log(LogLevel::Error, format!("Cannot read '{}': {}", p, e));
+                                            }
+                                        }
+                                    }
+                                    _ => {
+                                        self.logs_pane.add_log(LogLevel::Info, "Type :import <file> to import a Postman collection or curl command");
+                                    }
+                                }
                             }
                             AppEvent::TabOpened { .. } => {
                                 let id = self.tab_manager.open_blank();
@@ -1376,6 +1415,61 @@ impl TerminalSession for TerminalGuard {
     fn resume(&mut self) -> Result<(), EditorError> {
         TerminalGuard::resume(self).map_err(|err| EditorError::Terminal(err.to_string()))
     }
+}
+
+/// Parse a Postman collection JSON string and load its requests into the UI.
+/// Returns the number of requests imported.
+fn import_postman_collection(
+    content: &str,
+    tab_manager: &mut TabManager,
+    request_pane: &mut RequestPane,
+    logs_pane: &mut LogsPane,
+) -> Result<usize, String> {
+    // Try Postman collection first
+    if let Ok((collection, warnings)) =
+        yinx_import::postman::parse_collection_to_collection(content)
+    {
+        for w in &warnings {
+            logs_pane.add_log(crate::logs_pane::LogLevel::Warning, w.clone());
+        }
+        let flat: Vec<_> = collection.flatten_requests().to_vec();
+        let count = flat.len();
+        for (i, sr) in flat.iter().enumerate() {
+            logs_pane.add_log(
+                crate::logs_pane::LogLevel::Info,
+                format!(
+                    "  [{}] {} {} — {}",
+                    i + 1,
+                    sr.request.method,
+                    sr.request.url.as_str(),
+                    sr.name
+                ),
+            );
+        }
+        // Load the first request into the request pane
+        if let Some(first) = flat.first() {
+            request_pane.set_request(first.request.clone());
+            let _ = tab_manager.open_blank();
+            logs_pane.add_log(
+                crate::logs_pane::LogLevel::Info,
+                "First request loaded; use history to access others.".to_string(),
+            );
+        }
+        return Ok(count);
+    }
+
+    // Try curl
+    if let Ok(request) = yinx_import::curl::parse_curl(content) {
+        logs_pane.add_log(
+            crate::logs_pane::LogLevel::Info,
+            format!("  {} {}", request.method, request.url.as_str()),
+        );
+        request_pane.set_request(request);
+        let _ = tab_manager.open_blank();
+        return Ok(1);
+    }
+
+    Err("Unrecognized format. Expected a Postman v2.1 collection JSON or a curl command.".to_string())
 }
 
 #[cfg(test)]
