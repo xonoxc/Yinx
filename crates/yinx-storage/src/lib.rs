@@ -4,6 +4,7 @@ pub mod history;
 pub mod persistence;
 pub mod store;
 pub mod tab_store;
+pub mod workspace_manager_store;
 pub mod workspace_store;
 
 pub use collection_store::{CollectionStore, CollectionStoreError, JsonCollectionStore};
@@ -12,4 +13,5 @@ pub use history::HistoryStore;
 pub use persistence::{SessionStore, WorkflowStore};
 pub use store::{JsonFileStore, StorageError, Store};
 pub use tab_store::{TabStore, TabStoreError};
+pub use workspace_manager_store::{WorkspaceManagerStore, WorkspaceManagerStoreError};
 pub use workspace_store::{WorkspaceStore, WorkspaceStoreError};

@@ -12,3 +12,4 @@ pub mod tabs;
 pub mod timing;
 pub mod variables;
 pub mod workspace;
+pub mod workspace_manager;

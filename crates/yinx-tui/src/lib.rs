@@ -1,6 +1,7 @@
 pub mod app;
 pub mod command_palette;
 pub mod editor;
+pub mod environment_editor;
 pub mod input;
 pub mod layout;
 pub mod logs_pane;

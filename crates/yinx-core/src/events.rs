@@ -113,6 +113,45 @@ pub enum AppEvent {
     },
     WorkspaceSaved,
     WorkspaceSettingsChanged,
+    WorkspaceCreated {
+        id: String,
+        name: String,
+    },
+    WorkspaceDeleted {
+        id: String,
+    },
+    WorkspaceRenamed {
+        id: String,
+        name: String,
+    },
+    WorkspaceSwitched {
+        from: Option<String>,
+        to: String,
+    },
+    WorkspaceListRequested,
+    WorkspaceSwitchRequested {
+        id: String,
+    },
+    WorkspaceCreateRequested {
+        name: String,
+    },
+    WorkspaceDeleteRequested {
+        id: String,
+    },
+
+    // Environment editing events
+    EnvironmentEditOpened {
+        id: String,
+    },
+    EnvironmentVariableEdited {
+        env_id: String,
+        key: String,
+        value: String,
+    },
+    EnvironmentVariableToggled {
+        env_id: String,
+        key: String,
+    },
 
     // Workflow events
     WorkflowStarted {
@@ -443,6 +482,31 @@ impl StateReducer {
             }
             AppEvent::WorkspaceSaved => {}
             AppEvent::WorkspaceSettingsChanged => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::WorkspaceCreated { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::WorkspaceDeleted { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::WorkspaceRenamed { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::WorkspaceSwitched { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::WorkspaceListRequested => {}
+            AppEvent::WorkspaceSwitchRequested { .. } => {}
+            AppEvent::WorkspaceCreateRequested { .. } => {}
+            AppEvent::WorkspaceDeleteRequested { .. } => {}
+            AppEvent::EnvironmentEditOpened { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::EnvironmentVariableEdited { .. } => {
+                diff.app_state_changed = true;
+            }
+            AppEvent::EnvironmentVariableToggled { .. } => {
                 diff.app_state_changed = true;
             }
         }

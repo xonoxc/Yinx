@@ -11,11 +11,13 @@ use yinx_core::collections::{Collection, CollectionItem};
 use yinx_core::environments::Environment;
 use yinx_core::request::request_to_curl;
 use yinx_core::state::HistoryEntry;
+use yinx_core::workspace_manager::WorkspaceSummary;
 
 use crate::theme::Theme;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SidebarSection {
+    Workspaces,
     Collections,
     Environments,
     History,
@@ -23,6 +25,14 @@ pub enum SidebarSection {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidebarItem {
+    WorkspaceHeader {
+        active_name: String,
+    },
+    WorkspaceEntry {
+        id: String,
+        name: String,
+        active: bool,
+    },
     CollectionHeader {
         id: String,
         name: String,
@@ -65,6 +75,8 @@ pub struct Sidebar {
     selected_index: usize,
     list_state: ListState,
     filter_active: bool,
+    workspaces: Vec<WorkspaceSummary>,
+    active_workspace_name: String,
 }
 
 impl Sidebar {
@@ -82,7 +94,15 @@ impl Sidebar {
             selected_index: 0,
             list_state: ListState::default(),
             filter_active: false,
+            workspaces: Vec::new(),
+            active_workspace_name: String::new(),
         }
+    }
+
+    pub fn set_workspaces(&mut self, active: &str, all: &[WorkspaceSummary]) {
+        self.active_workspace_name = active.to_string();
+        self.workspaces = all.to_vec();
+        self.rebuild_items();
     }
 
     pub fn set_collections(&mut self, collections: Vec<Collection>) {
@@ -117,6 +137,23 @@ impl Sidebar {
         self.selected_index
     }
 
+    pub fn is_filter_active(&self) -> bool {
+        self.filter_active
+    }
+
+    pub fn start_filter(&mut self) {
+        self.filter_active = true;
+        self.filter.clear();
+    }
+
+    pub fn exit_filter(&mut self) {
+        if self.filter_active {
+            self.filter_active = false;
+            self.filter.clear();
+            self.rebuild_items();
+        }
+    }
+
     pub fn filter(&self) -> &str {
         &self.filter
     }
@@ -127,6 +164,28 @@ impl Sidebar {
 
     fn rebuild_items(&mut self) {
         let mut items: Vec<SidebarItem> = Vec::new();
+
+        // Workspaces section
+        let ws_collapsed = self
+            .collapsed_sections
+            .contains(&SidebarSection::Workspaces);
+        items.push(SidebarItem::SectionHeader {
+            section: SidebarSection::Workspaces,
+        });
+
+        if !ws_collapsed {
+            items.push(SidebarItem::WorkspaceHeader {
+                active_name: self.active_workspace_name.clone(),
+            });
+            for ws in &self.workspaces {
+                let is_active = ws.name == self.active_workspace_name;
+                items.push(SidebarItem::WorkspaceEntry {
+                    id: ws.id.clone(),
+                    name: ws.name.clone(),
+                    active: is_active,
+                });
+            }
+        }
 
         // Collections section
         let collections_collapsed = self
@@ -336,6 +395,13 @@ impl Sidebar {
         }
     }
 
+    pub fn paste_filter_text(&mut self, text: &str) {
+        if self.filter_active && !text.is_empty() {
+            self.filter.push_str(text);
+            self.rebuild_items();
+        }
+    }
+
     fn collapse_current(&mut self) {
         if let Some(item) = self.items.get(self.selected_index) {
             match item {
@@ -384,17 +450,53 @@ impl Sidebar {
         }
     }
 
+    #[allow(dead_code)]
+    fn can_select_up(&self) -> bool {
+        self.selected_index > 0
+    }
+
+    #[allow(dead_code)]
+    fn can_select_down(&self) -> bool {
+        self.selected_index < self.items.len().saturating_sub(1)
+    }
+
     fn activate_current(&mut self) {
         if let Some(item) = self.items.get(self.selected_index) {
-            if let SidebarItem::Environment { id, .. } = item {
-                if self.active_env.as_deref() == Some(id) {
-                    self.active_env = None;
-                } else {
-                    self.active_env = Some(id.clone());
+            match item {
+                SidebarItem::Environment { id, .. } => {
+                    if self.active_env.as_deref() == Some(id) {
+                        self.active_env = None;
+                    } else {
+                        self.active_env = Some(id.clone());
+                    }
+                    self.rebuild_items();
                 }
-                self.rebuild_items();
+                SidebarItem::WorkspaceEntry { .. } => {
+                    // Workspace switching is handled in app.rs
+                }
+                _ => {}
             }
         }
+    }
+
+    pub fn get_selected_workspace_id(&self) -> Option<String> {
+        self.items.get(self.selected_index).and_then(|item| {
+            if let SidebarItem::WorkspaceEntry { id, .. } = item {
+                Some(id.clone())
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn get_selected_environment_id(&self) -> Option<String> {
+        self.items.get(self.selected_index).and_then(|item| {
+            if let SidebarItem::Environment { id, .. } = item {
+                Some(id.clone())
+            } else {
+                None
+            }
+        })
     }
 
     pub fn active_environment_id(&self) -> Option<String> {
@@ -423,6 +525,11 @@ impl Sidebar {
             .map(|(_i, item)| match item {
                 SidebarItem::SectionHeader { section } => {
                     let (name, is_collapsed) = match section {
+                        SidebarSection::Workspaces => (
+                            "WORKSPACES",
+                            self.collapsed_sections
+                                .contains(&SidebarSection::Workspaces),
+                        ),
                         SidebarSection::Collections => (
                             "COLLECTIONS",
                             self.collapsed_sections
@@ -446,6 +553,29 @@ impl Sidebar {
                             .fg(theme.section_title())
                             .add_modifier(Modifier::BOLD),
                     )))
+                }
+                SidebarItem::WorkspaceHeader { active_name } => {
+                    ListItem::new(Line::from(Span::styled(
+                        format!("  ▾ {} ", active_name),
+                        Style::default()
+                            .fg(theme.semantic.info.as_color())
+                            .add_modifier(Modifier::BOLD),
+                    )))
+                }
+                SidebarItem::WorkspaceEntry { name, active, .. } => {
+                    if *active {
+                        ListItem::new(Line::from(Span::styled(
+                            format!("    ● {} ", name),
+                            Style::default()
+                                .fg(theme.semantic.success.as_color())
+                                .add_modifier(Modifier::BOLD),
+                        )))
+                    } else {
+                        ListItem::new(Line::from(Span::styled(
+                            format!("    ○ {} ", name),
+                            Style::default().fg(theme.foreground.as_color()),
+                        )))
+                    }
                 }
                 SidebarItem::CollectionHeader { id, name } => {
                     let icon = if self.collapsed_collections.contains(id) {

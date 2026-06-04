@@ -2,7 +2,7 @@ use std::io;
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::{
     event::{
@@ -23,6 +23,7 @@ use crate::layout::WorkspaceLayout;
 use crate::logs_pane::{LogLevel, LogsPane};
 use crate::request_pane::RequestPane;
 use crate::response_pane::ResponsePane;
+use crate::environment_editor::EnvironmentEditor;
 use crate::settings_pane::SettingsPane;
 use crate::sidebar::Sidebar;
 use crate::tab_bar::TabBar;
@@ -35,8 +36,11 @@ use yinx_core::state::UiState;
 use yinx_core::state::{ActivePane, HistoryEntry, InputMode, NetworkState};
 use yinx_core::tabs::TabManager;
 use yinx_core::timing::{RequestMetrics, Timing};
+use yinx_core::workspace::Workspace;
+use yinx_core::workspace_manager::WorkspaceManager;
 use yinx_http::client::HttpClient;
 use yinx_http::controller::{RequestController, RequestEvent};
+use yinx_storage::workspace_manager_store::WorkspaceManagerStore;
 
 use crate::input::InputHandler;
 
@@ -170,6 +174,11 @@ struct TuiShell {
     environments: Vec<Environment>,
     active_env_id: Option<String>,
     import_path: Option<String>,
+    notification: Option<(String, Instant)>,
+    workspace_manager: WorkspaceManager,
+    active_workspace: Workspace,
+    workspace_store: WorkspaceManagerStore,
+    environment_editor: EnvironmentEditor,
 }
 
 impl TuiShell {
@@ -202,6 +211,49 @@ impl TuiShell {
         let tab_bar = TabBar::new();
         let tab_manager = TabManager::new(20);
 
+        // Initialize workspace manager
+        let config_dir = std::env::var("HOME")
+            .map(|h| std::path::PathBuf::from(h).join(".config").join("yinx"))
+            .unwrap_or_else(|_| std::path::PathBuf::from(".yinx"));
+        let workspace_store = match WorkspaceManagerStore::new(config_dir.join("workspaces")) {
+            Ok(store) => store,
+            Err(_) => {
+                logs_pane.add_log(LogLevel::Warning, "Could not create workspace store directory");
+                let store = WorkspaceManagerStore::new(std::env::temp_dir().join("yinx-workspaces")).unwrap_or_else(|_| {
+                    let tmp = std::env::temp_dir().join("yinx-workspaces");
+                    std::fs::create_dir_all(&tmp).ok();
+                    WorkspaceManagerStore::new(&tmp).unwrap()
+                });
+                store
+            }
+        };
+
+        let workspace_manager = match workspace_store.load_index() {
+            Ok(mgr) => mgr,
+            Err(e) => {
+                logs_pane.add_log(LogLevel::Warning, format!("Could not load workspace index: {}. Creating default.", e));
+                let mut mgr = WorkspaceManager::new();
+                mgr.create("Default");
+                mgr
+            }
+        };
+
+        let active_id = workspace_manager.active().map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                let mut mgr_clone = workspace_manager.clone();
+                let ws = mgr_clone.create("Default");
+                ws.id
+            });
+
+        let active_workspace = match workspace_store.load_workspace(&active_id) {
+            Ok(Some(ws)) => ws,
+            _ => {
+                let ws = Workspace::new(active_id.clone());
+                workspace_store.save_workspace(&ws).ok();
+                ws
+            }
+        };
+
         Self {
             theme,
             theme_registry,
@@ -225,12 +277,87 @@ impl TuiShell {
             environments: Vec::new(),
             active_env_id: None,
             import_path: None,
+            notification: None,
+            workspace_manager,
+            active_workspace,
+            workspace_store,
+            environment_editor: EnvironmentEditor::new(),
         }
     }
 
     fn sync_sidebar_environments(&mut self) {
         self.sidebar
             .set_environments(self.environments.clone(), self.active_env_id.clone());
+    }
+
+    fn sync_from_active_workspace(&mut self) {
+        self.sidebar.set_collections(self.active_workspace.collections.clone());
+        self.environments = self.active_workspace.environments.clone();
+        self.active_env_id = self.active_workspace.active_environment.clone();
+        self.sync_sidebar_environments();
+        self.sidebar.set_workspaces(
+            &self.active_workspace.name,
+            self.workspace_manager.list(),
+        );
+    }
+
+    fn switch_to_workspace(&mut self, id: &str) {
+        // Save current workspace
+        self.workspace_store.save_workspace(&self.active_workspace).ok();
+        self.workspace_manager.update_summary(&self.active_workspace);
+
+        // Switch
+        if let Err(e) = self.workspace_manager.switch(id) {
+            self.logs_pane.add_log(LogLevel::Error, e);
+            return;
+        }
+
+        // Load target workspace
+        match self.workspace_store.load_workspace(id) {
+            Ok(Some(ws)) => {
+                self.active_workspace = ws;
+            }
+            _ => {
+                self.active_workspace = Workspace::new(id.to_string());
+                self.workspace_store.save_workspace(&self.active_workspace).ok();
+            }
+        }
+
+        self.workspace_store.save_index(&self.workspace_manager).ok();
+        self.sync_from_active_workspace();
+        self.logs_pane.add_log(LogLevel::Info, format!("Switched to workspace '{}'", self.active_workspace.name));
+    }
+
+    fn create_workspace(&mut self, name: &str) {
+        let ws = self.workspace_manager.create(name);
+        self.workspace_store.save_index(&self.workspace_manager).ok();
+        self.workspace_store.save_workspace(&ws).ok();
+        self.active_workspace = ws;
+        self.sync_from_active_workspace();
+        self.logs_pane.add_log(LogLevel::Info, format!("Created and switched to workspace '{}'", name));
+    }
+
+    fn delete_workspace(&mut self, id: &str) {
+        let is_active = self.workspace_manager.active() == Some(id);
+
+        if let Err(e) = self.workspace_manager.delete(id) {
+            self.logs_pane.add_log(LogLevel::Error, e);
+            return;
+        }
+
+        // Remove from disk
+        self.workspace_store.delete_workspace(id).ok();
+
+        // If it was active, switch to first remaining
+        if is_active {
+            let first_id = self.workspace_manager.list().first().map(|s| s.id.clone());
+            if let Some(ref id) = first_id {
+                self.switch_to_workspace(id);
+            }
+        }
+
+        self.workspace_store.save_index(&self.workspace_manager).ok();
+        self.logs_pane.add_log(LogLevel::Info, "Workspace deleted");
     }
 
     fn apply_theme_name(&mut self, name: &str) {
@@ -358,7 +485,8 @@ impl TuiShell {
                                 }
                             }
                             AppEvent::SaveState => {
-                                self.logs_pane.add_log(LogLevel::Info, "State saved");
+                                self.workspace_store.save_workspace(&self.active_workspace).ok();
+                                self.logs_pane.add_log(LogLevel::Info, "Workspace saved");
                             }
                             AppEvent::SearchActivated => {
                                 self.logs_pane.add_log(LogLevel::Info, "Search activated");
@@ -367,6 +495,112 @@ impl TuiShell {
                                 self.settings_pane.open();
                                 // Remove this once a proper settings screen exists
                                 self.show_help = !self.show_help;
+                            }
+                            AppEvent::WorkspaceListRequested => {
+                                let names: Vec<String> = self.workspace_manager.list().iter().map(|w| w.name.clone()).collect();
+                                self.logs_pane.add_log(LogLevel::Info, format!("Workspaces: {}", names.join(", ")));
+                            }
+                            AppEvent::WorkspaceCreateRequested { name } => {
+                                let name = name.trim();
+                                if name.is_empty() {
+                                    let input = self.command_palette.input.as_str().to_string();
+                                    let extracted = input.strip_prefix(":ws new ").or_else(|| input.strip_prefix(":workspace-new "))
+                                        .map(|s| s.trim().to_string()).unwrap_or_default();
+                                    if extracted.is_empty() {
+                                        self.logs_pane.add_log(LogLevel::Warning, "Usage: :ws new <name>");
+                                    } else {
+                                        self.create_workspace(&extracted);
+                                    }
+                                } else {
+                                    self.create_workspace(name);
+                                }
+                            }
+                            AppEvent::WorkspaceSwitchRequested { id } => {
+                                let name = if id.is_empty() {
+                                    let input = self.command_palette.input.as_str().to_string();
+                                    input.strip_prefix(":ws switch ").or_else(|| input.strip_prefix(":workspace-switch "))
+                                        .map(|s| s.trim().to_string()).unwrap_or_default()
+                                } else {
+                                    id.clone()
+                                };
+                                if name.is_empty() {
+                                    self.logs_pane.add_log(LogLevel::Warning, "Usage: :ws switch <name>");
+                                } else if let Some(summary) = self.workspace_manager.find_by_name(&name) {
+                                    let ws_id = summary.id.clone();
+                                    self.switch_to_workspace(&ws_id);
+                                } else {
+                                    self.logs_pane.add_log(LogLevel::Error, format!("Workspace '{}' not found", name));
+                                }
+                            }
+                            AppEvent::WorkspaceDeleteRequested { id } => {
+                                let name = if id.is_empty() {
+                                    let input = self.command_palette.input.as_str().to_string();
+                                    input.strip_prefix(":ws delete ").or_else(|| input.strip_prefix(":workspace-delete "))
+                                        .map(|s| s.trim().to_string()).unwrap_or_default()
+                                } else {
+                                    id.clone()
+                                };
+                                if name.is_empty() {
+                                    self.logs_pane.add_log(LogLevel::Warning, "Usage: :ws delete <name>");
+                                } else if let Some(summary) = self.workspace_manager.find_by_name(&name) {
+                                    let count = summary.collection_count;
+                                    let ws_id = summary.id.clone();
+                                    if count > 0 {
+                                        self.logs_pane.add_log(LogLevel::Warning, format!("Workspace '{}' contains {} collection(s). Deleting will remove them.", name, count));
+                                    }
+                                    self.delete_workspace(&ws_id);
+                                } else {
+                                    self.logs_pane.add_log(LogLevel::Error, format!("Workspace '{}' not found", name));
+                                }
+                            }
+                            AppEvent::EnvironmentEditOpened { id } => {
+                                let env_name = if id.is_empty() {
+                                    let input = self.command_palette.input.as_str().to_string();
+                                    input.strip_prefix(":env edit ").map(|s| s.trim().to_string()).unwrap_or_default()
+                                } else {
+                                    id.clone()
+                                };
+                                if self.active_workspace.environments.iter().any(|e| e.name == env_name) {
+                                    self.logs_pane.add_log(LogLevel::Info, format!("Open environment editor for '{}'", env_name));
+                                } else {
+                                    self.logs_pane.add_log(LogLevel::Error, format!("Environment '{}' not found", env_name));
+                                }
+                            }
+                            AppEvent::EnvironmentCreated(env) => {
+                                let name = if env.name.is_empty() {
+                                    let input = self.command_palette.input.as_str().to_string();
+                                    input.strip_prefix(":env new ").map(|s| s.trim().to_string()).unwrap_or_default()
+                                } else {
+                                    env.name.clone()
+                                };
+                                if name.is_empty() {
+                                    self.logs_pane.add_log(LogLevel::Warning, "Usage: :env new <name>");
+                                } else {
+                                    let new_env = Environment::new(name.clone());
+                                    self.active_workspace.add_environment(new_env);
+                                    self.workspace_store.save_workspace(&self.active_workspace).ok();
+                                    self.sync_from_active_workspace();
+                                    self.logs_pane.add_log(LogLevel::Info, format!("Environment '{}' created", name));
+                                }
+                            }
+                            AppEvent::EnvironmentDeleted { id } => {
+                                let name = if id.is_empty() {
+                                    let input = self.command_palette.input.as_str().to_string();
+                                    input.strip_prefix(":env delete ").map(|s| s.trim().to_string()).unwrap_or_default()
+                                } else {
+                                    id.clone()
+                                };
+                                let env_id = self.active_workspace.environments.iter()
+                                    .find(|e| e.name == name)
+                                    .map(|e| e.id.clone());
+                                if let Some(eid) = env_id {
+                                    self.active_workspace.remove_environment(&eid);
+                                    self.workspace_store.save_workspace(&self.active_workspace).ok();
+                                    self.sync_from_active_workspace();
+                                    self.logs_pane.add_log(LogLevel::Info, format!("Environment '{}' deleted", name));
+                                } else {
+                                    self.logs_pane.add_log(LogLevel::Error, format!("Environment '{}' not found", name));
+                                }
                             }
                             AppEvent::ImportStarted { source } => {
                                 let path = self.import_path.take().or_else(|| {
@@ -381,16 +615,26 @@ impl TuiShell {
                                         match std::fs::read_to_string(p) {
                                             Ok(content) => {
                                                 match import_postman_collection(&content, &mut self.tab_manager, &mut self.request_pane, &mut self.logs_pane) {
-                                                    Ok(count) => {
+                                                    Ok((count, Some(collection))) => {
+                                                        self.active_workspace.add_collection(collection);
+                                                        self.workspace_store.save_workspace(&self.active_workspace).ok();
+                                                        self.sync_from_active_workspace();
                                                         self.logs_pane.add_log(LogLevel::Info, format!("Imported {} request(s) from {}", count, p));
+                                                        self.notification = Some((format!("Imported {} request(s)", count), Instant::now()));
+                                                    }
+                                                    Ok((count, None)) => {
+                                                        self.logs_pane.add_log(LogLevel::Info, format!("Imported {} request(s) from {}", count, p));
+                                                        self.notification = Some((format!("Imported {} request(s)", count), Instant::now()));
                                                     }
                                                     Err(e) => {
                                                         self.logs_pane.add_log(LogLevel::Error, format!("Import failed: {}", e));
+                                                        self.notification = Some((format!("Import failed: {}", e), Instant::now()));
                                                     }
                                                 }
                                             }
                                             Err(e) => {
                                                 self.logs_pane.add_log(LogLevel::Error, format!("Cannot read '{}': {}", p, e));
+                                                self.notification = Some((format!("Cannot read '{}'", p), Instant::now()));
                                             }
                                         }
                                     }
@@ -436,6 +680,42 @@ impl TuiShell {
                     self.input_handler.switch_mode(InputMode::Normal);
                 }
                 PaletteAction::None => {}
+            }
+            return Ok(());
+        }
+
+        // Handle environment editor if open
+        if self.environment_editor.is_open() {
+            let key_str = match key_event.code {
+                KeyCode::Char(c) => {
+                    if key_event.modifiers.contains(KeyModifiers::CONTROL) {
+                        match c {
+                            's' => "Ctrl+s".to_string(),
+                            _ => return Ok(()),
+                        }
+                    } else {
+                        c.to_string()
+                    }
+                }
+                KeyCode::Esc => "Esc".to_string(),
+                KeyCode::Enter => "Enter".to_string(),
+                KeyCode::Backspace => "Backspace".to_string(),
+                KeyCode::Down => "Down".to_string(),
+                KeyCode::Up => "Up".to_string(),
+                _ => return Ok(()),
+            };
+            let events = self.environment_editor.handle_key(&key_str);
+            for evt in events {
+                if let AppEvent::EnvironmentUpdated { id } = evt {
+                    if let Some(env) = self.environment_editor.environment.clone() {
+                        if let Some(idx) = self.active_workspace.environments.iter().position(|e| e.id == id) {
+                            self.active_workspace.environments[idx] = env;
+                        }
+                    }
+                    self.workspace_store.save_workspace(&self.active_workspace).ok();
+                    self.sync_from_active_workspace();
+                    self.logs_pane.add_log(LogLevel::Info, "Environment updated");
+                }
             }
             return Ok(());
         }
@@ -536,6 +816,10 @@ impl TuiShell {
                 AppEvent::ModeChanged(mode) => {
                     if mode == InputMode::Command {
                         self.command_palette.show();
+                    } else if mode == InputMode::Insert && self.active_pane == ActivePane::Sidebar {
+                        self.sidebar.start_filter();
+                    } else if mode == InputMode::Normal && self.active_pane == ActivePane::Sidebar {
+                        self.sidebar.exit_filter();
                     }
                     handled = true;
                 }
@@ -681,13 +965,34 @@ impl TuiShell {
     }
 
     fn handle_paste(&mut self, text: &str) {
-        if self.command_palette.is_visible() || self.settings_pane.is_open() || self.show_help {
+        if text.is_empty() {
             return;
         }
 
-        if self.active_pane == ActivePane::Request && self.request_pane.paste_text(text) {
-            self.logs_pane
-                .add_log(LogLevel::Info, "Pasted into request editor");
+        if self.command_palette.is_visible() {
+            self.command_palette.paste_text(text);
+            return;
+        }
+
+        if self.settings_pane.is_open() || self.show_help {
+            return;
+        }
+
+        match self.active_pane {
+            ActivePane::Request => {
+                if self.request_pane.paste_text(text) {
+                    self.logs_pane.add_log(LogLevel::Info, "Pasted into request editor");
+                }
+            }
+            ActivePane::Response => {
+                // Response is read-only, no paste target
+            }
+            ActivePane::Sidebar => {
+                if self.sidebar.is_filter_active() {
+                    self.sidebar.paste_filter_text(text);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -737,6 +1042,7 @@ impl TuiShell {
                 KeyCode::Char('g') if is_normal => Some(code),
                 KeyCode::Left | KeyCode::Right | KeyCode::Up | KeyCode::Down => Some(code),
                 KeyCode::Home | KeyCode::End | KeyCode::PageUp | KeyCode::PageDown => Some(code),
+                KeyCode::Enter => Some(code),
                 KeyCode::Tab => Some(code),
                 _ if !is_normal => Some(code),
                 _ => None,
@@ -745,6 +1051,30 @@ impl TuiShell {
 
         match self.active_pane {
             ActivePane::Sidebar => match key_event.code {
+                KeyCode::Char('e') if is_normal => {
+                    if let Some(env_id) = self.sidebar.get_selected_environment_id() {
+                        if let Some(env) = self.active_workspace.environments.iter().find(|e| e.id == env_id).cloned() {
+                            self.environment_editor.open(env);
+                        }
+                    }
+                    return;
+                }
+                KeyCode::Char('d') if is_normal => {
+                    if let Some(env_id) = self.sidebar.get_selected_environment_id() {
+                        self.active_workspace.remove_environment(&env_id);
+                        self.workspace_store.save_workspace(&self.active_workspace).ok();
+                        self.sync_from_active_workspace();
+                        self.logs_pane.add_log(LogLevel::Info, "Environment deleted");
+                        return;
+                    }
+                    let entry_id = self.sidebar.selected_history_entry().map(|e| e.id.clone());
+                    if let Some(id) = entry_id {
+                        self.history.retain(|e| e.id != id);
+                        self.sidebar.set_history(self.history.clone());
+                        self.logs_pane.add_log(LogLevel::Info, "History entry deleted");
+                    }
+                    return;
+                }
                 KeyCode::Char('r') => {
                     if let Some(action) = self.sidebar.get_selected_history_action() {
                         self.logs_pane.add_log(
@@ -764,16 +1094,6 @@ impl TuiShell {
                     if let Some(action) = self.sidebar.get_selected_history_action() {
                         self.logs_pane
                             .add_log(LogLevel::Info, format!("Curl: {}", action.curl));
-                    }
-                    return;
-                }
-                KeyCode::Char('d') => {
-                    let entry_id = self.sidebar.selected_history_entry().map(|e| e.id.clone());
-                    if let Some(id) = entry_id {
-                        self.history.retain(|e| e.id != id);
-                        self.sidebar.set_history(self.history.clone());
-                        self.logs_pane
-                            .add_log(LogLevel::Info, "History entry deleted");
                     }
                     return;
                 }
@@ -982,6 +1302,12 @@ impl TuiShell {
             self.settings_pane
                 .render(frame, centered_rect(area, 70, 70), &self.theme);
         }
+
+        // Environment editor overlay
+        if self.environment_editor.is_open() {
+            self.environment_editor
+                .render(frame, area, &self.theme);
+        }
     }
 
     fn render_minimal_fallback(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
@@ -1007,7 +1333,7 @@ impl TuiShell {
         frame.render_widget(paragraph, area);
     }
 
-    fn render_status_bar(&self, frame: &mut ratatui::Frame<'_>, area: Rect) {
+    fn render_status_bar(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) {
         let current_mode = self.input_handler.current_mode();
         let mode_str = match current_mode {
             InputMode::Normal => "NORMAL",
@@ -1032,9 +1358,22 @@ impl TuiShell {
             ActivePane::Logs => "ACTIVITY",
             _ => "YINX",
         };
+
+        let notif_msg = self.notification.as_ref().and_then(|(msg, time)| {
+            if time.elapsed() < Duration::from_secs(5) {
+                Some(msg.clone())
+            } else {
+                None
+            }
+        });
+        if notif_msg.is_none() {
+            self.notification = None;
+        }
+
         let status = StatusBar::new(mode_str)
             .with_network_state(&self.network_state)
             .with_cursor(0, 0)
+            .with_left(notif_msg.as_deref().unwrap_or(""))
             .with_center(focus_label)
             .with_right(&response_meta);
         status.render(frame, area, &self.theme);
@@ -1418,13 +1757,13 @@ impl TerminalSession for TerminalGuard {
 }
 
 /// Parse a Postman collection JSON string and load its requests into the UI.
-/// Returns the number of requests imported.
+/// Returns the number of requests imported and, for Postman collections, the parsed collection.
 fn import_postman_collection(
     content: &str,
     tab_manager: &mut TabManager,
     request_pane: &mut RequestPane,
     logs_pane: &mut LogsPane,
-) -> Result<usize, String> {
+) -> Result<(usize, Option<yinx_core::collections::Collection>), String> {
     // Try Postman collection first
     if let Ok((collection, warnings)) =
         yinx_import::postman::parse_collection_to_collection(content)
@@ -1452,10 +1791,10 @@ fn import_postman_collection(
             let _ = tab_manager.open_blank();
             logs_pane.add_log(
                 crate::logs_pane::LogLevel::Info,
-                "First request loaded; use history to access others.".to_string(),
+                "First request loaded; browse the sidebar for all requests.".to_string(),
             );
         }
-        return Ok(count);
+        return Ok((count, Some(collection)));
     }
 
     // Try curl
@@ -1466,7 +1805,7 @@ fn import_postman_collection(
         );
         request_pane.set_request(request);
         let _ = tab_manager.open_blank();
-        return Ok(1);
+        return Ok((1, None));
     }
 
     Err("Unrecognized format. Expected a Postman v2.1 collection JSON or a curl command.".to_string())

@@ -11,6 +11,7 @@ pub enum CommandCategory {
     Settings,
     Help,
     System,
+    Workspace,
 }
 
 #[derive(Debug, Clone)]
@@ -49,9 +50,16 @@ impl Command {
         if name_lower.starts_with(&input_lower) {
             return Some(input_lower.len() as u32 * 100);
         }
+        if input_lower.starts_with(&name_lower) && input_lower.as_bytes().get(name_lower.len()) == Some(&b' ') {
+            return Some(name_lower.len() as u32 * 100);
+        }
         for alias in self.aliases {
-            if alias.to_lowercase().starts_with(&input_lower) {
+            let alias_lower = alias.to_lowercase();
+            if alias_lower.starts_with(&input_lower) {
                 return Some(input_lower.len() as u32 * 90);
+            }
+            if input_lower.starts_with(&alias_lower) && input_lower.as_bytes().get(alias_lower.len()) == Some(&b' ') {
+                return Some(alias_lower.len() as u32 * 90);
             }
         }
 
@@ -281,6 +289,64 @@ impl CommandRegistry {
             execute: || vec![AppEvent::ClearLogs],
         });
 
+        // Workspace commands
+        registry.register(Command {
+            name: "workspace-list",
+            aliases: &["ws list", "workspaces"],
+            description: "List all workspaces",
+            category: CommandCategory::Workspace,
+            execute: || vec![AppEvent::WorkspaceListRequested],
+        });
+
+        registry.register(Command {
+            name: "workspace-new",
+            aliases: &["ws new"],
+            description: "Create a new workspace (usage: :ws new <name>)",
+            category: CommandCategory::Workspace,
+            execute: || vec![AppEvent::WorkspaceCreateRequested { name: String::new() }],
+        });
+
+        registry.register(Command {
+            name: "workspace-switch",
+            aliases: &["ws switch"],
+            description: "Switch to a workspace (usage: :ws switch <name>)",
+            category: CommandCategory::Workspace,
+            execute: || vec![AppEvent::WorkspaceSwitchRequested { id: String::new() }],
+        });
+
+        registry.register(Command {
+            name: "workspace-delete",
+            aliases: &["ws delete"],
+            description: "Delete a workspace (usage: :ws delete <name>)",
+            category: CommandCategory::Workspace,
+            execute: || vec![AppEvent::WorkspaceDeleteRequested { id: String::new() }],
+        });
+
+        // Environment editing commands
+        registry.register(Command {
+            name: "env-new",
+            aliases: &[],
+            description: "Create a new environment (usage: :env new <name>)",
+            category: CommandCategory::Environment,
+            execute: || vec![AppEvent::EnvironmentCreated(crate::environments::Environment::new(String::new()))],
+        });
+
+        registry.register(Command {
+            name: "env-delete",
+            aliases: &[],
+            description: "Delete an environment (usage: :env delete <name>)",
+            category: CommandCategory::Environment,
+            execute: || vec![AppEvent::EnvironmentDeleted { id: String::new() }],
+        });
+
+        registry.register(Command {
+            name: "env-edit",
+            aliases: &[],
+            description: "Edit environment variables (usage: :env edit <name>)",
+            category: CommandCategory::Environment,
+            execute: || vec![AppEvent::EnvironmentEditOpened { id: String::new() }],
+        });
+
         registry
     }
 }
@@ -434,8 +500,9 @@ mod tests {
             CommandCategory::Settings,
             CommandCategory::Help,
             CommandCategory::System,
+            CommandCategory::Workspace,
         ];
-        assert_eq!(categories.len(), 9);
+        assert_eq!(categories.len(), 10);
     }
 
     #[test]

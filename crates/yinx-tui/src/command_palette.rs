@@ -1,16 +1,18 @@
 use ratatui::{
     layout::{Alignment, Rect},
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph},
+    widgets::{Block, Clear, Paragraph},
     Frame,
 };
 
 use yinx_core::commands::{CommandCategory, CommandRegistry};
 use yinx_core::events::AppEvent;
 
+use std::path::Path;
+
 use crate::input::InputBuffer;
-use crate::theme::Theme;
+use crate::theme::{is_dark, Theme};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PaletteAction {
@@ -25,6 +27,9 @@ pub struct CommandPalette {
     registry: CommandRegistry,
     matches: Vec<CommandMatch>,
     selected: usize,
+    path_completions: Vec<String>,
+    path_selected: usize,
+    path_mode: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +59,9 @@ impl CommandPalette {
             registry,
             matches,
             selected: 0,
+            path_completions: Vec::new(),
+            path_selected: 0,
+            path_mode: false,
         }
     }
 
@@ -94,6 +102,10 @@ impl CommandPalette {
                 return PaletteAction::Close;
             }
             KeyCode::Enter => {
+                if self.path_mode && !self.path_completions.is_empty() {
+                    self.apply_path_completion();
+                    return PaletteAction::None;
+                }
                 if !self.matches.is_empty() {
                     let idx = self.selected.min(self.matches.len() - 1);
                     let cmd_match = &self.matches[idx];
@@ -106,6 +118,8 @@ impl CommandPalette {
             }
             KeyCode::Backspace => {
                 self.input.delete_char();
+                self.path_mode = false;
+                self.path_completions.clear();
                 self.update_matches();
                 self.selected = 0;
             }
@@ -130,15 +144,43 @@ impl CommandPalette {
                 }
             }
             KeyCode::Char(c) => {
-                if key_event.modifiers == KeyModifiers::NONE || key_event.modifiers.is_empty() {
+                let is_only_shift = key_event.modifiers == KeyModifiers::SHIFT;
+                if key_event.modifiers == KeyModifiers::NONE
+                    || key_event.modifiers.is_empty()
+                    || is_only_shift
+                {
                     self.input.insert_char(c);
+                    self.path_mode = false;
+                    self.path_completions.clear();
                     self.update_matches();
                     self.selected = 0;
                 }
             }
             KeyCode::Tab => {
-                if !self.matches.is_empty() {
+                if self.path_mode {
+                    if !self.path_completions.is_empty() {
+                        self.path_selected =
+                            (self.path_selected + 1) % self.path_completions.len();
+                    }
+                } else if self.input.as_str().trim_start_matches(':').contains(' ') {
+                    self.scan_path_completions();
+                } else if !self.matches.is_empty() {
                     self.selected = (self.selected + 1) % self.matches.len();
+                }
+            }
+            KeyCode::BackTab => {
+                if self.path_mode {
+                    if !self.path_completions.is_empty() {
+                        self.path_selected = self
+                            .path_selected
+                            .saturating_sub(1)
+                            % self.path_completions.len();
+                    }
+                } else if !self.matches.is_empty() {
+                    self.selected = self
+                        .selected
+                        .saturating_sub(1)
+                        % self.matches.len();
                 }
             }
             KeyCode::PageUp => {
@@ -189,13 +231,134 @@ impl CommandPalette {
         Some(self.matches[idx].command_name)
     }
 
+    fn current_path_prefix(&self) -> Option<String> {
+        let text = self.input.as_str().trim_start_matches(':');
+        let space_idx = text.find(' ')?;
+        let after_space = text[space_idx + 1..].to_string();
+        if after_space.is_empty() { None } else { Some(after_space) }
+    }
+
+    fn scan_path_completions(&mut self) {
+        let prefix = match self.current_path_prefix() {
+            Some(p) => p,
+            None => {
+                self.path_mode = false;
+                self.path_completions.clear();
+                return;
+            }
+        };
+
+        let base_dir = if prefix.is_empty() {
+            ".".to_string()
+        } else if prefix.ends_with('/') {
+            prefix.clone()
+        } else {
+            let parent = Path::new(&prefix).parent();
+            match parent {
+                Some(p) if !p.as_os_str().is_empty() => p.to_string_lossy().to_string(),
+                _ => ".".to_string(),
+            }
+        };
+
+        let partial = if prefix.ends_with('/') {
+            String::new()
+        } else {
+            Path::new(&prefix)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default()
+        };
+
+        let entries = match std::fs::read_dir(&base_dir) {
+            Ok(rd) => rd,
+            Err(_) => {
+                self.path_completions.clear();
+                self.path_mode = false;
+                return;
+            }
+        };
+
+        let mut completions: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                name.starts_with(&partial) && !name.starts_with('.')
+            })
+            .map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                let sep = if is_dir { "/" } else { " " };
+                let display = format!("{}{}", name, sep);
+                display
+            })
+            .collect();
+
+        completions.sort();
+
+        if completions.is_empty() {
+            self.path_mode = false;
+            self.path_completions.clear();
+        } else {
+            self.path_mode = true;
+            self.path_completions = completions;
+            self.path_selected = 0;
+        }
+    }
+
+    fn apply_path_completion(&mut self) {
+        if self.path_completions.is_empty() {
+            return;
+        }
+        let idx = self.path_selected.min(self.path_completions.len() - 1);
+        let completion = &self.path_completions[idx];
+
+        let text = self.input.as_str();
+        let colon_stripped = text.trim_start_matches(':');
+        let space_idx = match colon_stripped.find(' ') {
+            Some(i) => i,
+            None => return,
+        };
+        let before_arg = &text[..space_idx + 1 + text.len() - colon_stripped.len()];
+
+        let completion_trimmed = completion.trim_end();
+        let new_text = format!("{}{}", before_arg, completion_trimmed);
+        self.input = InputBuffer::with_content(&new_text);
+        self.path_mode = false;
+        self.path_completions.clear();
+        self.update_matches();
+    }
+
+    pub fn paste_text(&mut self, text: &str) {
+        if self.visible && !text.is_empty() {
+            self.input.insert_str(text);
+            self.update_matches();
+            self.selected = 0;
+        }
+    }
+
+    fn elevated_bg(&self, theme: &Theme) -> Color {
+        let bg = theme.subtle_bg();
+        if bg != Color::Reset {
+            // Only use the theme's subtle_bg if it's dark enough
+            if is_dark(bg) {
+                return bg;
+            }
+        }
+        // Always use a dark background for the elevated overlay
+        Color::Rgb(30, 30, 38)
+    }
+
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
         if !self.visible {
             return;
         }
 
-        let palette_height =
-            (self.matches.len().min(10) as u16 + 3).min(area.height.saturating_sub(2));
+        let list_len = if self.path_mode {
+            self.path_completions.len()
+        } else {
+            self.matches.len()
+        };
+        let palette_height = (list_len.min(10) as u16 + 3).min(area.height.saturating_sub(2));
         let palette_width = area.width.saturating_mul(60).saturating_div(100).max(40);
 
         let x = area.x + area.width.saturating_sub(palette_width) / 2;
@@ -205,39 +368,79 @@ impl CommandPalette {
 
         frame.render_widget(Clear, palette_area);
 
+        let bg = self.elevated_bg(theme);
+
         let input_text = self.input.as_str();
 
         let block = Block::default()
-            .title(" COMMAND ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme.border.active_color.as_color()))
-            .style(
-                Style::default()
-                    .bg(theme.pane.bg_color())
-                    .fg(theme.foreground.as_color()),
-            );
+            .style(Style::default().bg(bg).fg(theme.foreground.as_color()));
 
         let inner = block.inner(palette_area);
         frame.render_widget(block, palette_area);
+
+        // Thin top accent line
+        let top_line = Rect::new(palette_area.x, palette_area.y, palette_area.width, 1);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(theme.border.active_color.as_color())),
+            top_line,
+        );
 
         let input_line = Paragraph::new(Line::from(Span::styled(
             input_text,
             Style::default().fg(theme.foreground.as_color()),
         )))
-        .style(
-            Style::default()
-                .bg(theme.highlight.bg.as_color())
-                .fg(theme.foreground.as_color()),
-        );
+        .style(Style::default().bg(bg).fg(theme.foreground.as_color()));
 
-        let input_area = Rect::new(inner.x, inner.y, inner.width, 1);
+        let input_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
         frame.render_widget(input_line, input_area);
 
         let cursor_x = inner.x + 1 + (input_text.len() as u16).min(inner.width.saturating_sub(2));
-        frame.set_cursor_position(ratatui::prelude::Position::new(cursor_x, inner.y));
+        frame.set_cursor_position(ratatui::prelude::Position::new(cursor_x, inner.y + 1));
 
-        let list_start_y = inner.y + 1;
-        let max_items = inner.height.saturating_sub(1).min(10) as usize;
+        let list_start_y = inner.y + 2;
+        let max_items = inner.height.saturating_sub(2).min(10) as usize;
+
+        if self.path_mode {
+            let visible: Vec<_> = self
+                .path_completions
+                .iter()
+                .take(max_items)
+                .enumerate()
+                .collect();
+            for (display_idx, path) in &visible {
+                let is_selected = *display_idx == self.path_selected;
+                let y_pos = list_start_y + *display_idx as u16;
+
+                let style = if is_selected {
+                    Style::default()
+                        .bg(theme.highlight.selected_bg.as_color())
+                        .fg(theme.highlight.selected_fg.as_color())
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .bg(bg)
+                        .fg(theme.foreground.as_color())
+                };
+
+                let is_dir = path.ends_with('/');
+                let path_style = if is_dir {
+                    theme.semantic.info.as_color()
+                } else {
+                    theme.foreground.as_color()
+                };
+
+                let line = Paragraph::new(Line::from(Span::styled(
+                    format!("  {}", path),
+                    Style::default().fg(path_style),
+                )))
+                .style(style)
+                .alignment(Alignment::Left);
+
+                let item_area = Rect::new(inner.x, y_pos, inner.width, 1);
+                frame.render_widget(line, item_area);
+            }
+            return;
+        }
 
         let visible_matches: Vec<_> = self.matches.iter().take(max_items).enumerate().collect();
 
@@ -252,7 +455,7 @@ impl CommandPalette {
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
-                    .bg(theme.pane.bg_color())
+                    .bg(bg)
                     .fg(theme.foreground.as_color())
             };
 
@@ -266,6 +469,7 @@ impl CommandPalette {
                 CommandCategory::Settings => theme.muted_color(),
                 CommandCategory::Help => theme.semantic.info.as_color(),
                 CommandCategory::System => theme.semantic.error.as_color(),
+                CommandCategory::Workspace => theme.semantic.info.as_color(),
             };
 
             let name_span = Span::styled(
@@ -488,7 +692,7 @@ mod tests {
         let mut palette = CommandPalette::new();
         palette.show();
 
-        palette.input = InputBuffer::with_content(":w");
+        palette.input = InputBuffer::with_content(":save");
         palette.update_matches();
 
         let event = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);

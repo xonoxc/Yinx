@@ -499,6 +499,13 @@ impl<'a> StatusBar<'a> {
 
         let mut line = vec![Span::raw(" "), mode_span, Span::raw("  "), network_span];
 
+        if !self.left.is_empty() {
+            line.push(Span::styled(
+                format!(" {}  ", self.left),
+                Style::default().fg(theme.semantic.info.as_color()),
+            ));
+        }
+
         if !self.center.is_empty() {
             line.push(Span::styled(
                 format!(" {}  ", self.center),
