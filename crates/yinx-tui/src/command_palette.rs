@@ -2,7 +2,7 @@ use ratatui::{
     layout::{Alignment, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Clear, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 
@@ -12,7 +12,7 @@ use yinx_core::events::AppEvent;
 use std::path::Path;
 
 use crate::input::InputBuffer;
-use crate::theme::{is_dark, Theme};
+use crate::theme::Theme;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PaletteAction {
@@ -337,15 +337,7 @@ impl CommandPalette {
     }
 
     fn elevated_bg(&self, theme: &Theme) -> Color {
-        let bg = theme.subtle_bg();
-        if bg != Color::Reset {
-            // Only use the theme's subtle_bg if it's dark enough
-            if is_dark(bg) {
-                return bg;
-            }
-        }
-        // Always use a dark background for the elevated overlay
-        Color::Rgb(30, 30, 38)
+        theme.pane_bg(true)
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect, theme: &Theme) {
@@ -358,11 +350,11 @@ impl CommandPalette {
         } else {
             self.matches.len()
         };
-        let palette_height = (list_len.min(10) as u16 + 3).min(area.height.saturating_sub(2));
+        let palette_height = (list_len.min(10) as u16 + 5).min(area.height.saturating_sub(4));
         let palette_width = area.width.saturating_mul(60).saturating_div(100).max(40);
 
         let x = area.x + area.width.saturating_sub(palette_width) / 2;
-        let y = area.y + 1;
+        let y = area.y + area.height.saturating_sub(palette_height) / 2;
 
         let palette_area = Rect::new(x, y, palette_width, palette_height);
 
@@ -373,17 +365,13 @@ impl CommandPalette {
         let input_text = self.input.as_str();
 
         let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme.border.active_color.as_color()))
+            .title(" Commands ")
             .style(Style::default().bg(bg).fg(theme.foreground.as_color()));
 
         let inner = block.inner(palette_area);
         frame.render_widget(block, palette_area);
-
-        // Thin top accent line
-        let top_line = Rect::new(palette_area.x, palette_area.y, palette_area.width, 1);
-        frame.render_widget(
-            Block::default().style(Style::default().bg(theme.border.active_color.as_color())),
-            top_line,
-        );
 
         let input_line = Paragraph::new(Line::from(Span::styled(
             input_text,
@@ -391,14 +379,14 @@ impl CommandPalette {
         )))
         .style(Style::default().bg(bg).fg(theme.foreground.as_color()));
 
-        let input_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
+        let input_area = Rect::new(inner.x, inner.y, inner.width, 1);
         frame.render_widget(input_line, input_area);
 
         let cursor_x = inner.x + 1 + (input_text.len() as u16).min(inner.width.saturating_sub(2));
-        frame.set_cursor_position(ratatui::prelude::Position::new(cursor_x, inner.y + 1));
+        frame.set_cursor_position(ratatui::prelude::Position::new(cursor_x, inner.y));
 
-        let list_start_y = inner.y + 2;
-        let max_items = inner.height.saturating_sub(2).min(10) as usize;
+        let list_start_y = inner.y + 1;
+        let max_items = inner.height.saturating_sub(1).min(10) as usize;
 
         if self.path_mode {
             let visible: Vec<_> = self
