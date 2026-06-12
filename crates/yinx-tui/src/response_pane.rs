@@ -197,6 +197,15 @@ impl ResponsePane {
             return;
         };
 
+        let status_line = format!("{}  {}  {}ms  {}", 
+            response.status,
+            human_size(response.body_size()),
+            response.timing_ms,
+            response.content_type().unwrap_or("unknown"),
+        );
+        self.lines_cache.push(status_line);
+        self.lines_cache.push(String::new());
+
         match self.view_mode {
             ResponseViewMode::Pretty => match &response.body {
                 ResponseBody::Json(v) => {

@@ -274,6 +274,14 @@ impl CommandRegistry {
         });
 
         registry.register(Command {
+            name: "activity",
+            aliases: &["toggle-activity", "logs"],
+            description: "Toggle activity/logs pane visibility",
+            category: CommandCategory::Navigation,
+            execute: || vec![AppEvent::ToggleActivity],
+        });
+
+        registry.register(Command {
             name: "search",
             aliases: &["find", "/"],
             description: "Search within current view",

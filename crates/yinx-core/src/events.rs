@@ -202,6 +202,7 @@ pub enum AppEvent {
     ThemeChanged(String),
 
     // Command & keybinding events
+    ToggleActivity,
     ClearLogs,
     CloseOtherTabs,
     EqualizePanes,
@@ -408,7 +409,8 @@ impl StateReducer {
             AppEvent::ConfigChanged { .. } => {
                 diff.app_state_changed = true;
             }
-            AppEvent::ClearLogs
+            AppEvent::ToggleActivity
+            | AppEvent::ClearLogs
             | AppEvent::CloseOtherTabs
             | AppEvent::EqualizePanes
             | AppEvent::MaximizePaneHeight

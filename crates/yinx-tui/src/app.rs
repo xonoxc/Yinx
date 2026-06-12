@@ -447,7 +447,7 @@ impl TuiShell {
         {
             self.active_pane = ActivePane::Sidebar;
         } else {
-            let (response_area, logs_area) = split_response_logs(wrects.center_bottom);
+        let (response_area, logs_area) = split_response_logs(wrects.center_bottom, self.workspace_layout.logs_visible);
             if let Some(logs_rect) = logs_area {
                 if self.is_in_rect(mouse_event.column, mouse_event.row, logs_rect) {
                     self.active_pane = ActivePane::Logs;
@@ -686,6 +686,9 @@ impl TuiShell {
                             }
                             AppEvent::PaneChanged(pane) => {
                                 self.active_pane = pane;
+                            }
+                            AppEvent::ToggleActivity => {
+                                self.workspace_layout.toggle_logs();
                             }
                             AppEvent::ClearLogs => {
                                 self.logs_pane = LogsPane::new();
@@ -1362,15 +1365,25 @@ impl TuiShell {
         );
         render_horizontal_divider(frame, request_divider, &self.theme);
 
-        let (response_area, logs_area) = split_response_logs(wrects.center_bottom);
-        let (response_content, response_divider) = reserve_bottom_divider(response_area);
-        self.response_pane.render(
-            frame,
-            response_content,
-            &self.theme,
-            self.active_pane == ActivePane::Response,
-        );
-        render_horizontal_divider(frame, response_divider, &self.theme);
+        let (response_area, logs_area) = split_response_logs(wrects.center_bottom, self.workspace_layout.logs_visible);
+
+        if logs_area.is_some() {
+            let (response_content, response_divider) = reserve_bottom_divider(response_area);
+            self.response_pane.render(
+                frame,
+                response_content,
+                &self.theme,
+                self.active_pane == ActivePane::Response,
+            );
+            render_horizontal_divider(frame, response_divider, &self.theme);
+        } else {
+            self.response_pane.render(
+                frame,
+                response_area,
+                &self.theme,
+                self.active_pane == ActivePane::Response,
+            );
+        }
 
         if let Some(logs_area) = logs_area {
             self.logs_pane.render(
@@ -1629,8 +1642,8 @@ fn reserve_right_divider(area: Rect) -> (Rect, Rect) {
     )
 }
 
-fn split_response_logs(area: Rect) -> (Rect, Option<Rect>) {
-    if area.width < 64 || area.height < 10 {
+fn split_response_logs(area: Rect, logs_visible: bool) -> (Rect, Option<Rect>) {
+    if !logs_visible || area.width < 64 || area.height < 10 {
         return (area, None);
     }
 

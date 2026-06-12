@@ -513,6 +513,7 @@ pub struct WorkspaceLayout {
     pub sidebar_min: u16,
     pub sidebar_max_pct: f32,
     pub center_split_ratio: f32,
+    pub logs_visible: bool,
     pub terminal_size: (u16, u16),
     pub tab_bar_height: u16,
     pub status_bar_height: u16,
@@ -526,6 +527,7 @@ impl Default for WorkspaceLayout {
             sidebar_min: 20,
             sidebar_max_pct: 0.42,
             center_split_ratio: 0.42,
+            logs_visible: false,
             terminal_size: (80, 24),
             tab_bar_height: 2,
             status_bar_height: 3,
@@ -548,6 +550,10 @@ impl WorkspaceLayout {
 
     pub fn toggle_sidebar(&mut self) {
         self.sidebar_visible = !self.sidebar_visible;
+    }
+
+    pub fn toggle_logs(&mut self) {
+        self.logs_visible = !self.logs_visible;
     }
 
     pub fn sidebar_visible(&self) -> bool {

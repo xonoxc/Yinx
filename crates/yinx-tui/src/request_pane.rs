@@ -1534,14 +1534,15 @@ impl RequestPane {
 
         // Animated spinner for active requests
         if !self.network_state.is_idle() {
-            const SPINNER_FRAMES: &[char] = &['-', '+', '*', '+', '-'];
-            const TICK_MS: u128 = 100;
+            const SPINNER_FRAMES: &[&str] = &[" ▹▹▹▹▹", " ▸▹▹▹▹", " ▹▸▹▹▹", " ▹▹▸▹▹", " ▹▹▹▸▹", " ▹▹▹▹▸"];
+            const TICK_MS: u128 = 120;
             let elapsed = self.loading_started_at
                 .map(|t| t.elapsed().as_millis())
                 .unwrap_or(0);
             let spin_idx = (elapsed / TICK_MS) as usize % SPINNER_FRAMES.len();
             let spinner = SPINNER_FRAMES[spin_idx];
-            let indicator = format!(" {} ", spinner);
+            let label = "LOADING";
+            let indicator = format!("{}{}", spinner, label);
             let indicator_width = indicator.len() as u16;
             let indicator_color = theme.semantic.warning.as_color();
             let indicator_span = Span::styled(
