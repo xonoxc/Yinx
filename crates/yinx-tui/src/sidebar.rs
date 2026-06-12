@@ -23,6 +23,14 @@ pub enum SidebarSection {
     History,
 }
 
+#[derive(Debug, Clone)]
+pub enum RenameTarget {
+    Workspace { id: String, name: String },
+    Collection { id: String, name: String },
+    Request { collection_id: String, request_id: String, name: String },
+    Folder { collection_id: String, name: String },
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidebarItem {
     WorkspaceHeader {
@@ -38,10 +46,12 @@ pub enum SidebarItem {
         name: String,
     },
     CollectionFolder {
+        id: String,
         name: String,
         depth: usize,
     },
     CollectionRequest {
+        id: String,
         name: String,
         depth: usize,
     },
@@ -77,6 +87,9 @@ pub struct Sidebar {
     filter_active: bool,
     workspaces: Vec<WorkspaceSummary>,
     active_workspace_name: String,
+    pub is_renaming: bool,
+    pub rename_input: String,
+    pub rename_target: Option<RenameTarget>,
 }
 
 impl Sidebar {
@@ -96,6 +109,9 @@ impl Sidebar {
             filter_active: false,
             workspaces: Vec::new(),
             active_workspace_name: String::new(),
+            is_renaming: false,
+            rename_input: String::new(),
+            rename_target: None,
         }
     }
 
@@ -204,7 +220,7 @@ impl Sidebar {
                 });
 
                 if !collection_collapsed {
-                    self.flatten_items(&collection.items, 1, &mut items);
+                    self.flatten_items(&collection.items, &collection.id, 1, &mut items);
                 }
             }
         }
@@ -251,7 +267,7 @@ impl Sidebar {
         self.list_state.select(Some(self.selected_index));
     }
 
-    fn flatten_items(&self, items: &[CollectionItem], depth: usize, result: &mut Vec<SidebarItem>) {
+    fn flatten_items(&self, items: &[CollectionItem], collection_id: &str, depth: usize, result: &mut Vec<SidebarItem>) {
         for item in items {
             match item {
                 CollectionItem::Request(req) => {
@@ -259,6 +275,7 @@ impl Sidebar {
                         continue;
                     }
                     result.push(SidebarItem::CollectionRequest {
+                        id: req.id.clone(),
                         name: req.name.clone(),
                         depth,
                     });
@@ -270,11 +287,12 @@ impl Sidebar {
                     let folder_key = vec![name.clone()];
                     let collapsed = self.collapsed_folders.contains(&folder_key);
                     result.push(SidebarItem::CollectionFolder {
+                        id: collection_id.to_string(),
                         name: name.clone(),
                         depth,
                     });
                     if !collapsed {
-                        self.flatten_items(children, depth + 1, result);
+                        self.flatten_items(children, collection_id, depth + 1, result);
                     }
                 }
             }
@@ -288,9 +306,32 @@ impl Sidebar {
         text.to_lowercase().contains(&self.filter.to_lowercase())
     }
 
+    pub fn is_rename_active(&self) -> bool {
+        self.is_renaming
+    }
+
+    pub fn take_rename_target(&mut self) -> Option<RenameTarget> {
+        if self.is_renaming {
+            return None;
+        }
+        let target = self.rename_target.take();
+        self.rename_input.clear();
+        target
+    }
+
+    pub fn cancel_rename(&mut self) {
+        self.is_renaming = false;
+        self.rename_input.clear();
+        self.rename_target = None;
+    }
+
     pub fn handle_key(&mut self, key_code: KeyCode) -> bool {
         if self.filter_active {
             return self.handle_filter_key(key_code);
+        }
+
+        if self.is_renaming {
+            return self.handle_rename_key(key_code);
         }
 
         match key_code {
@@ -399,6 +440,67 @@ impl Sidebar {
         if self.filter_active && !text.is_empty() {
             self.filter.push_str(text);
             self.rebuild_items();
+        }
+    }
+
+    pub fn start_rename(&mut self) {
+        let Some(item) = self.items.get(self.selected_index).cloned() else { return };
+        let target = match item {
+            SidebarItem::WorkspaceEntry { id, name, .. } => {
+                RenameTarget::Workspace { id, name }
+            }
+            SidebarItem::CollectionHeader { id, name } => {
+                RenameTarget::Collection { id, name }
+            }
+            SidebarItem::CollectionRequest { id, name, .. } => {
+                let collection_id = self.find_collection_for_item(self.selected_index);
+                RenameTarget::Request { collection_id, request_id: id, name }
+            }
+            SidebarItem::CollectionFolder { id, name, .. } => {
+                RenameTarget::Folder { collection_id: id, name }
+            }
+            _ => return,
+        };
+        let current_name = match &target {
+            RenameTarget::Workspace { name, .. } => name,
+            RenameTarget::Collection { name, .. } => name,
+            RenameTarget::Request { name, .. } => name,
+            RenameTarget::Folder { name, .. } => name,
+        }.clone();
+        self.is_renaming = true;
+        self.rename_input = current_name;
+        self.rename_target = Some(target);
+    }
+
+    fn find_collection_for_item(&self, index: usize) -> String {
+        // Walk backwards to find the nearest CollectionHeader
+        for i in (0..=index).rev() {
+            if let Some(SidebarItem::CollectionHeader { id, .. }) = self.items.get(i) {
+                return id.clone();
+            }
+        }
+        String::new()
+    }
+
+    fn handle_rename_key(&mut self, key_code: KeyCode) -> bool {
+        match key_code {
+            KeyCode::Esc => {
+                self.cancel_rename();
+                true
+            }
+            KeyCode::Enter => {
+                self.is_renaming = false;
+                true
+            }
+            KeyCode::Backspace => {
+                self.rename_input.pop();
+                true
+            }
+            KeyCode::Char(c) => {
+                self.rename_input.push(c);
+                true
+            }
+            _ => false,
         }
     }
 
@@ -518,11 +620,23 @@ impl Sidebar {
             area,
         );
 
+        let renaming_index = if self.is_renaming { Some(self.selected_index) } else { None };
+
         let rendered_items: Vec<ListItem> = self
             .items
             .iter()
             .enumerate()
-            .map(|(_i, item)| match item {
+            .map(|(i, item)| {
+                if renaming_index == Some(i) {
+                    let display = if self.rename_input.is_empty() { " ".to_string() } else { self.rename_input.clone() };
+                    return ListItem::new(Line::from(Span::styled(
+                        format!(" {} ", display),
+                        Style::default()
+                            .fg(theme.semantic.info.as_color())
+                            .bg(theme.highlight.selected_bg.as_color()),
+                    )));
+                }
+                match item {
                 SidebarItem::SectionHeader { section } => {
                     let (name, is_collapsed) = match section {
                         SidebarSection::Workspaces => (
@@ -592,7 +706,7 @@ impl Sidebar {
                         Style::default().fg(theme.semantic.info.as_color()),
                     )))
                 }
-                SidebarItem::CollectionFolder { name, depth } => {
+                SidebarItem::CollectionFolder { name, depth, .. } => {
                     let key = vec![name.clone()];
                     let icon = if self.collapsed_folders.contains(&key) {
                         "▸"
@@ -610,7 +724,7 @@ impl Sidebar {
                         Style::default().fg(theme.semantic.warning.as_color()),
                     )))
                 }
-                SidebarItem::CollectionRequest { name, depth } => {
+                SidebarItem::CollectionRequest { name, depth, .. } => {
                     let indent = "  ".repeat(*depth + 2);
                     ListItem::new(Line::from(Span::styled(
                         format!(
@@ -685,6 +799,7 @@ impl Sidebar {
                         )),
                     ])
                 }
+            }
             })
             .collect();
 

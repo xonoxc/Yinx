@@ -1,12 +1,16 @@
+pub mod collection_db;
 pub mod collection_store;
 pub mod environment_store;
 pub mod history;
 pub mod persistence;
+pub mod session_store;
 pub mod store;
 pub mod tab_store;
 pub mod workspace_manager_store;
 pub mod workspace_store;
 
+pub use collection_db::{CollectionDb, CollectionDbError};
+pub use session_store::SessionState;
 pub use collection_store::{CollectionStore, CollectionStoreError, JsonCollectionStore};
 pub use environment_store::{EnvironmentStore, EnvironmentStoreError, JsonEnvironmentStore};
 pub use history::HistoryStore;

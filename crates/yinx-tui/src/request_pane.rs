@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::{
@@ -14,6 +16,9 @@ use serde::{Deserialize, Serialize};
 use yinx_core::request::{
     Header, Headers, Method, Request, RequestBody, RequestBuilder, RequestError, RequestUrl,
 };
+use yinx_core::state::NetworkState;
+
+use yinx_storage::SessionState;
 
 use crate::editor::{EditorError, EditorFormat};
 use crate::input::InputBuffer;
@@ -163,6 +168,8 @@ pub struct RequestPane {
     url_autocomplete_selected: usize,
     search_visible: bool,
     compact: bool,
+    network_state: NetworkState,
+    loading_started_at: Option<Instant>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -221,6 +228,82 @@ impl RequestPane {
             url_autocomplete_selected: 0,
             search_visible: false,
             compact: false,
+            network_state: NetworkState::Idle,
+            loading_started_at: None,
+        }
+    }
+
+    pub fn set_network_state(&mut self, state: NetworkState) {
+        let was_idle = self.network_state.is_idle();
+        self.network_state = state;
+        if was_idle && !self.network_state.is_idle() {
+            self.loading_started_at = Some(Instant::now());
+        }
+        if self.network_state.is_idle() {
+            self.loading_started_at = None;
+        }
+    }
+
+    pub fn session_state(&self) -> SessionState {
+        SessionState {
+            request_method: Some(self.method.as_str().to_string()),
+            request_url: Some(self.url_buffer.as_str().to_string()),
+            request_headers: self.headers.iter().map(|(k, v)| (k.as_str().to_string(), v.as_str().to_string())).collect(),
+            request_body: Some(self.body_content.as_str().to_string()),
+            request_body_type: Some(self.body_type.as_str().to_string()),
+            request_auth_type: Some(self.auth_type.as_str().to_string()),
+            auth_username: Some(self.auth_username.as_str().to_string()),
+            auth_password: Some(self.auth_password.as_str().to_string()),
+            auth_token: Some(self.auth_token.as_str().to_string()),
+            request_params: self.params.iter().map(|(k, v)| (k.as_str().to_string(), v.as_str().to_string())).collect(),
+            selected_tab: Some(self.selected_tab),
+        }
+    }
+
+    pub fn restore_from_session(&mut self, session: &SessionState) {
+        if let Some(method) = &session.request_method {
+            if let Ok(m) = method.parse() {
+                self.method = m;
+            }
+        }
+        if let Some(url) = &session.request_url {
+            self.url_buffer = InputBuffer::with_content(url);
+        }
+        if !session.request_headers.is_empty() {
+            self.headers = session.request_headers.iter().map(|(k, v)| {
+                (InputBuffer::with_content(k), InputBuffer::with_content(v))
+            }).collect();
+        }
+        if let Some(body) = &session.request_body {
+            self.body_content = InputBuffer::with_content(body);
+        }
+        if let Some(body_type) = &session.request_body_type {
+            match body_type.as_str() {
+                "Raw" => self.body_type = BodyType::Raw,
+                "JSON" => self.body_type = BodyType::Json,
+                "Form" => self.body_type = BodyType::Form,
+                _ => {}
+            }
+        }
+        if let Some(auth_type) = &session.request_auth_type {
+            match auth_type.as_str() {
+                "None" => self.auth_type = AuthType::None,
+                "Basic" => self.auth_type = AuthType::Basic,
+                "Bearer" => self.auth_type = AuthType::Bearer,
+                "API Key" => self.auth_type = AuthType::ApiKey,
+                _ => {}
+            }
+        }
+        if let Some(u) = &session.auth_username { self.auth_username = InputBuffer::with_content(u); }
+        if let Some(p) = &session.auth_password { self.auth_password = InputBuffer::with_content(p); }
+        if let Some(t) = &session.auth_token { self.auth_token = InputBuffer::with_content(t); }
+        if !session.request_params.is_empty() {
+            self.params = session.request_params.iter().map(|(k, v)| {
+                (InputBuffer::with_content(k), InputBuffer::with_content(v))
+            }).collect();
+        }
+        if let Some(tab) = session.selected_tab {
+            self.selected_tab = tab.min(self.tab_titles().len().saturating_sub(1));
         }
     }
 
@@ -1448,6 +1531,33 @@ impl RequestPane {
             .style(Style::default().bg(bar_bg).fg(theme.foreground.as_color()))
             .wrap(Wrap { trim: true });
         frame.render_widget(bar_para, area);
+
+        // Animated spinner for active requests
+        if !self.network_state.is_idle() {
+            const SPINNER_FRAMES: &[char] = &['-', '+', '*', '+', '-'];
+            const TICK_MS: u128 = 100;
+            let elapsed = self.loading_started_at
+                .map(|t| t.elapsed().as_millis())
+                .unwrap_or(0);
+            let spin_idx = (elapsed / TICK_MS) as usize % SPINNER_FRAMES.len();
+            let spinner = SPINNER_FRAMES[spin_idx];
+            let indicator = format!(" {} ", spinner);
+            let indicator_width = indicator.len() as u16;
+            let indicator_color = theme.semantic.warning.as_color();
+            let indicator_span = Span::styled(
+                indicator,
+                Style::default()
+                    .fg(indicator_color)
+                    .add_modifier(Modifier::BOLD),
+            );
+            let ix = area.x + area.width.saturating_sub(indicator_width);
+            let indicator_area = Rect::new(ix, area.y, indicator_width, 1);
+            frame.render_widget(
+                Paragraph::new(Line::from(indicator_span))
+                    .style(Style::default().bg(bar_bg).fg(indicator_color)),
+                indicator_area,
+            );
+        }
 
         if url_focused {
             let mut cursor_x = 0u16;

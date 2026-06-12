@@ -25,10 +25,11 @@ use crate::request_pane::RequestPane;
 use crate::response_pane::ResponsePane;
 use crate::environment_editor::EnvironmentEditor;
 use crate::settings_pane::SettingsPane;
-use crate::sidebar::Sidebar;
+use crate::sidebar::{RenameTarget, Sidebar};
 use crate::tab_bar::TabBar;
 use crate::theme::{Theme, ThemeRegistry};
 use crate::widgets::StatusBar;
+use yinx_core::collections::CollectionItem;
 use yinx_core::environments::Environment;
 use yinx_core::events::{AppEvent, EventBus, StateReducer};
 #[cfg(test)]
@@ -41,6 +42,7 @@ use yinx_core::workspace_manager::WorkspaceManager;
 use yinx_http::client::HttpClient;
 use yinx_http::controller::{RequestController, RequestEvent};
 use yinx_storage::workspace_manager_store::WorkspaceManagerStore;
+use yinx_storage::CollectionDb;
 
 use crate::input::InputHandler;
 
@@ -60,14 +62,21 @@ pub enum AppError {
     Panic(String),
 }
 
-pub async fn run_tui() -> Result<(), AppError> {
+pub async fn run_tui(cwd: &std::path::Path, restore_session: bool) -> Result<(), AppError> {
     let mut app = App::init()?;
     let terminal_size = app
         .terminal()
         .size()
         .map_err(|e| AppError::Render(e.to_string()))?;
     let mut shell = TuiShell::new(terminal_size.width, terminal_size.height);
-    shell.sync_sidebar_environments();
+    shell.sync_from_active_workspace();
+
+    if restore_session {
+        let session_path = yinx_storage::SessionState::session_path(cwd);
+        if let Ok(session) = yinx_storage::SessionState::load_from(&session_path) {
+            shell.request_pane.restore_from_session(&session);
+        }
+    }
 
     loop {
         app.terminal()
@@ -75,6 +84,10 @@ pub async fn run_tui() -> Result<(), AppError> {
             .map_err(|e| AppError::Render(e.to_string()))?;
 
         if shell.should_quit() {
+            // Save session before quitting
+            let session = shell.request_pane.session_state();
+            let session_path = yinx_storage::SessionState::session_path(cwd);
+            session.save_to(&session_path).ok();
             break;
         }
 
@@ -178,6 +191,7 @@ struct TuiShell {
     workspace_manager: WorkspaceManager,
     active_workspace: Workspace,
     workspace_store: WorkspaceManagerStore,
+    collection_db: CollectionDb,
     environment_editor: EnvironmentEditor,
 }
 
@@ -212,9 +226,7 @@ impl TuiShell {
         let tab_manager = TabManager::new(20);
 
         // Initialize workspace manager
-        let config_dir = std::env::var("HOME")
-            .map(|h| std::path::PathBuf::from(h).join(".config").join("yinx"))
-            .unwrap_or_else(|_| std::path::PathBuf::from(".yinx"));
+        let config_dir = yinx_core::paths::config_dir();
         let workspace_store = match WorkspaceManagerStore::new(config_dir.join("workspaces")) {
             Ok(store) => store,
             Err(_) => {
@@ -245,7 +257,16 @@ impl TuiShell {
                 ws.id
             });
 
-        let active_workspace = match workspace_store.load_workspace(&active_id) {
+        let data_dir = yinx_core::paths::data_dir();
+        let db_path = data_dir.join("collections.db");
+        let collection_db = CollectionDb::open(&db_path)
+            .unwrap_or_else(|e| {
+                logs_pane.add_log(LogLevel::Warning, format!("Could not open collection database: {}", e));
+                CollectionDb::open(&std::env::temp_dir().join("yinx-collections.db"))
+                    .expect("Falling back to temp db")
+            });
+
+        let mut active_workspace = match workspace_store.load_workspace(&active_id) {
             Ok(Some(ws)) => ws,
             _ => {
                 let ws = Workspace::new(active_id.clone());
@@ -253,6 +274,15 @@ impl TuiShell {
                 ws
             }
         };
+
+        // Load persisted collections from SQLite
+        if let Ok(db_collections) = collection_db.load_all_collections() {
+            for col in db_collections {
+                if !active_workspace.collections.iter().any(|c| c.id == col.id) {
+                    active_workspace.collections.push(col);
+                }
+            }
+        }
 
         Self {
             theme,
@@ -281,6 +311,7 @@ impl TuiShell {
             workspace_manager,
             active_workspace,
             workspace_store,
+            collection_db,
             environment_editor: EnvironmentEditor::new(),
         }
     }
@@ -616,8 +647,13 @@ impl TuiShell {
                                             Ok(content) => {
                                                 match import_postman_collection(&content, &mut self.tab_manager, &mut self.request_pane, &mut self.logs_pane) {
                                                     Ok((count, Some(collection))) => {
+                                                        let col_id = collection.id.clone();
                                                         self.active_workspace.add_collection(collection);
                                                         self.workspace_store.save_workspace(&self.active_workspace).ok();
+                                                        // Persist to SQLite
+                                                        if let Some(col) = self.active_workspace.get_collection(&col_id) {
+                                                            self.collection_db.save_collection(col).ok();
+                                                        }
                                                         self.sync_from_active_workspace();
                                                         self.logs_pane.add_log(LogLevel::Info, format!("Imported {} request(s) from {}", count, p));
                                                         self.notification = Some((format!("Imported {} request(s)", count), Instant::now()));
@@ -749,6 +785,18 @@ impl TuiShell {
             }
         }
 
+        // When sidebar is in rename mode, route all keys directly (bypass global bindings)
+        if self.active_pane == ActivePane::Sidebar && self.sidebar.is_renaming {
+            let handled = self.sidebar.handle_key(key_event.code);
+            self.handle_pending_rename();
+            if handled {
+                if matches!(key_event.code, KeyCode::Enter | KeyCode::Esc) {
+                    self.input_handler.switch_mode(InputMode::Normal);
+                }
+                return Ok(());
+            }
+        }
+
         // Normal-mode global operations: resize, help, layout toggle, sidebar toggle
         if self.input_handler.current_mode() == InputMode::Normal {
             match key_event.code {
@@ -817,9 +865,9 @@ impl TuiShell {
                     if mode == InputMode::Command {
                         self.command_palette.show();
                     } else if mode == InputMode::Insert && self.active_pane == ActivePane::Sidebar {
-                        self.sidebar.start_filter();
+                        self.sidebar.start_rename();
                     } else if mode == InputMode::Normal && self.active_pane == ActivePane::Sidebar {
-                        self.sidebar.exit_filter();
+                        self.sidebar.cancel_rename();
                     }
                     handled = true;
                 }
@@ -996,6 +1044,55 @@ impl TuiShell {
         }
     }
 
+    fn handle_pending_rename(&mut self) {
+        let new_name = self.sidebar.rename_input.clone();
+        let Some(target) = self.sidebar.take_rename_target() else { return };
+        if new_name.is_empty() {
+            return;
+        }
+        match target {
+            RenameTarget::Workspace { id, .. } => {
+                let _ = self.workspace_manager.rename(&id, &new_name);
+                self.logs_pane.add_log(LogLevel::Info, format!("Workspace renamed to '{}'", new_name));
+            }
+            RenameTarget::Collection { id, .. } => {
+                if let Some(col) = self.active_workspace.collections.iter_mut().find(|c| c.id == id) {
+                    col.name = new_name.clone();
+                }
+                self.workspace_store.save_workspace(&self.active_workspace).ok();
+                self.collection_db.rename_collection(&id, &new_name).ok();
+                self.logs_pane.add_log(LogLevel::Info, format!("Collection renamed to '{}'", new_name));
+            }
+            RenameTarget::Request { collection_id, request_id, .. } => {
+                if let Some(col) = self.active_workspace.collections.iter_mut().find(|c| c.id == collection_id) {
+                    rename_request_in_items(&mut col.items, &request_id, &new_name);
+                }
+                self.workspace_store.save_workspace(&self.active_workspace).ok();
+                self.collection_db.rename_request_in_collection(&collection_id, &request_id, &new_name).ok();
+                self.logs_pane.add_log(LogLevel::Info, format!("Request renamed to '{}'", new_name));
+            }
+            RenameTarget::Folder { collection_id, name: old_name, .. } => {
+                if let Some(col) = self.active_workspace.collections.iter_mut().find(|c| c.id == collection_id) {
+                    if let Some(folder) = col.items.iter_mut().find_map(|item| {
+                        if let CollectionItem::Folder { name, children: _ } = item {
+                            if name == &old_name { Some(item) } else { None }
+                        } else { None }
+                    }) {
+                        if let CollectionItem::Folder { name, .. } = folder {
+                            *name = new_name.clone();
+                        }
+                    }
+                }
+                self.workspace_store.save_workspace(&self.active_workspace).ok();
+                if let Some(col) = self.active_workspace.get_collection(&collection_id) {
+                    self.collection_db.save_collection(col).ok();
+                }
+                self.logs_pane.add_log(LogLevel::Info, format!("Folder renamed to '{}'", new_name));
+            }
+        }
+        self.sync_from_active_workspace();
+    }
+
     async fn execute_request_with(
         &mut self,
         request: yinx_core::request::Request,
@@ -1010,6 +1107,7 @@ impl TuiShell {
             format!("Sending {} {}", request.method, request.url.as_str()),
         );
         self.network_state = NetworkState::Loading;
+        self.request_pane.set_network_state(NetworkState::Loading);
 
         let client = HttpClient::new()
             .map_err(|e| AppError::Render(e.to_string()))?
@@ -1075,21 +1173,6 @@ impl TuiShell {
                     }
                     return;
                 }
-                KeyCode::Char('r') => {
-                    if let Some(action) = self.sidebar.get_selected_history_action() {
-                        self.logs_pane.add_log(
-                            LogLevel::Info,
-                            format!(
-                                "Loaded from history: {} {}",
-                                action.request.method,
-                                action.request.url.as_str()
-                            ),
-                        );
-                        self.request_pane.set_request(action.request);
-                        self.active_pane = ActivePane::Request;
-                    }
-                    return;
-                }
                 KeyCode::Char('C') => {
                     if let Some(action) = self.sidebar.get_selected_history_action() {
                         self.logs_pane
@@ -1107,6 +1190,7 @@ impl TuiShell {
                     if let Some(code) = to_nav_key(key_event.code) {
                         let _ = self.sidebar.handle_key(code);
                         self.active_env_id = self.sidebar.active_environment_id();
+                        self.handle_pending_rename();
                     }
                 }
             },
@@ -1148,6 +1232,7 @@ impl TuiShell {
                             RequestEvent::Chunk(data, _offset) => {
                                 self.response_pane.stream_chunk(data);
                                 self.network_state = NetworkState::Streaming;
+                                self.request_pane.set_network_state(NetworkState::Streaming);
                             }
                             RequestEvent::Completed(response, elapsed_ms) => {
                                 let metrics = RequestMetrics::new()
@@ -1186,6 +1271,7 @@ impl TuiShell {
 
                                 self.response_pane.set_response(response);
                                 self.network_state = NetworkState::Idle;
+                                self.request_pane.set_network_state(NetworkState::Idle);
                                 self.active_pane = ActivePane::Response;
                                 self.request_rx = None;
                                 return;
@@ -1193,7 +1279,8 @@ impl TuiShell {
                             RequestEvent::Failed(message) => {
                                 self.logs_pane.add_log(LogLevel::Error, message.clone());
                                 self.response_pane.set_error(message.clone());
-                                self.network_state = NetworkState::Error(message);
+                                self.network_state = NetworkState::Error(message.clone());
+                                self.request_pane.set_network_state(NetworkState::Error(message));
                                 self.request_rx = None;
                                 return;
                             }
@@ -1491,6 +1578,21 @@ fn truncate_status_text(value: &str, max_chars: usize) -> String {
         format!("{truncated}...")
     } else {
         truncated
+    }
+}
+
+fn rename_request_in_items(items: &mut [CollectionItem], request_id: &str, new_name: &str) {
+    for item in items.iter_mut() {
+        match item {
+            CollectionItem::Request(req) if req.id == request_id => {
+                req.name = new_name.to_string();
+                return;
+            }
+            CollectionItem::Folder { children, .. } => {
+                rename_request_in_items(children, request_id, new_name);
+            }
+            _ => {}
+        }
     }
 }
 

@@ -25,6 +25,10 @@ pub struct Cli {
     /// Include headers and timing in output
     #[arg(long, global = true)]
     pub verbose: bool,
+
+    /// Restore the last TUI session for this directory
+    #[arg(long, global = true)]
+    pub r#continue: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -111,7 +115,8 @@ pub async fn run() {
 
     let cmd = match cli.command {
         None => {
-            if let Err(e) = yinx_tui::run_tui().await {
+            let cwd = std::env::current_dir().unwrap_or_default();
+            if let Err(e) = yinx_tui::run_tui(&cwd, cli.r#continue).await {
                 eprintln!("Error: {}", e);
                 process::exit(1);
             }
@@ -474,13 +479,7 @@ async fn import_file(
             .map_err(|e| format!("Failed to write output to '{}': {}", output_path, e))?;
         println!("Saved collection to {}", output_path);
     } else {
-        let default_dir = std::path::PathBuf::from(
-            &std::env::var("HOME").unwrap_or_else(|_| ".".to_string()),
-        )
-        .join(".local")
-        .join("share")
-        .join("yinx")
-        .join("collections");
+        let default_dir = yinx_core::paths::data_dir().join("collections");
         std::fs::create_dir_all(&default_dir)?;
         let output_path = default_dir.join(format!("{}.json", collection.id));
         let json = serde_json::to_string_pretty(&collection)?;

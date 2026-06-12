@@ -51,6 +51,7 @@ url = { version = "2", features = ["serde"] }
 bytes = "1"
 parking_lot = "0.12"
 base64 = "0.22"
+rusqlite = { version = "0.31", features = ["bundled"] }
 rand = "0.8"
 
 [profile.release]

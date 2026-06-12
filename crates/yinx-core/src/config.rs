@@ -87,18 +87,10 @@ pub fn discover_config() -> Option<PathBuf> {
         PathBuf::from(".yinxrc.json"),
     ];
 
-    if let Some(mut p) = xdg_config_dir() {
-        p.push("yinx/config.yaml");
-        candidates.push(p);
-    }
-    if let Some(mut p) = xdg_config_dir() {
-        p.push("yinx/config.yml");
-        candidates.push(p);
-    }
-    if let Some(mut p) = xdg_config_dir() {
-        p.push("yinx/config.json");
-        candidates.push(p);
-    }
+    let config_dir = crate::paths::config_dir();
+    candidates.push(config_dir.join("config.yaml"));
+    candidates.push(config_dir.join("config.yml"));
+    candidates.push(config_dir.join("config.json"));
     if let Some(mut p) = home_dir() {
         p.push(".yinxrc");
         candidates.push(p);
@@ -110,18 +102,6 @@ pub fn discover_config() -> Option<PathBuf> {
         }
     }
     None
-}
-
-fn xdg_config_dir() -> Option<PathBuf> {
-    env::var("XDG_CONFIG_HOME")
-        .ok()
-        .map(PathBuf::from)
-        .or_else(|| {
-            home_dir().map(|mut p| {
-                p.push(".config");
-                p
-            })
-        })
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -301,10 +281,8 @@ mod tests {
     }
 
     #[test]
-    fn test_xdg_config_dir() {
-        let dir = xdg_config_dir();
-        if env::var("HOME").is_ok() {
-            assert!(dir.is_some());
-        }
+    fn test_config_dir_resolves() {
+        let dir = crate::paths::config_dir();
+        assert!(!dir.as_os_str().is_empty());
     }
 }
