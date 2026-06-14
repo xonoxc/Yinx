@@ -447,7 +447,7 @@ impl TuiShell {
         {
             self.active_pane = ActivePane::Sidebar;
         } else {
-        let (response_area, logs_area) = split_response_logs(wrects.center_bottom, self.workspace_layout.logs_visible);
+        let (response_area, logs_area) = split_response_logs(wrects.center_bottom, self.workspace_layout.logs_visible, self.workspace_layout.logs_height);
             if let Some(logs_rect) = logs_area {
                 if self.is_in_rect(mouse_event.column, mouse_event.row, logs_rect) {
                     self.active_pane = ActivePane::Logs;
@@ -827,6 +827,38 @@ impl TuiShell {
                         ActivePane::Request | ActivePane::Response => {
                             self.workspace_layout.resize_center_split(-0.05)
                         }
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+                KeyCode::Left if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                    match self.active_pane {
+                        ActivePane::Sidebar => self.workspace_layout.resize_sidebar(-5),
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+                KeyCode::Right if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                    match self.active_pane {
+                        ActivePane::Sidebar => self.workspace_layout.resize_sidebar(5),
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+                KeyCode::Up if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                    match self.active_pane {
+                        ActivePane::Request => self.workspace_layout.resize_center_split(0.05),
+                        ActivePane::Response => self.workspace_layout.resize_center_split(-0.05),
+                        ActivePane::Logs => self.workspace_layout.resize_logs(2),
+                        _ => {}
+                    }
+                    return Ok(());
+                }
+                KeyCode::Down if key_event.modifiers.contains(KeyModifiers::ALT) => {
+                    match self.active_pane {
+                        ActivePane::Request => self.workspace_layout.resize_center_split(-0.05),
+                        ActivePane::Response => self.workspace_layout.resize_center_split(0.05),
+                        ActivePane::Logs => self.workspace_layout.resize_logs(-2),
                         _ => {}
                     }
                     return Ok(());
@@ -1365,7 +1397,7 @@ impl TuiShell {
         );
         render_horizontal_divider(frame, request_divider, &self.theme);
 
-        let (response_area, logs_area) = split_response_logs(wrects.center_bottom, self.workspace_layout.logs_visible);
+        let (response_area, logs_area) = split_response_logs(wrects.center_bottom, self.workspace_layout.logs_visible, self.workspace_layout.logs_height);
 
         if logs_area.is_some() {
             let (response_content, response_divider) = reserve_bottom_divider(response_area);
@@ -1642,16 +1674,12 @@ fn reserve_right_divider(area: Rect) -> (Rect, Rect) {
     )
 }
 
-fn split_response_logs(area: Rect, logs_visible: bool) -> (Rect, Option<Rect>) {
+fn split_response_logs(area: Rect, logs_visible: bool, logs_height: u16) -> (Rect, Option<Rect>) {
     if !logs_visible || area.width < 64 || area.height < 10 {
         return (area, None);
     }
 
-    let logs_height = if area.height < 20 {
-        3
-    } else {
-        (area.height / 4).clamp(3, 6)
-    };
+    let logs_height = logs_height.min(area.height.saturating_sub(4));
     let response_height = area.height.saturating_sub(logs_height);
     let chunks = Layout::default()
         .direction(Direction::Vertical)

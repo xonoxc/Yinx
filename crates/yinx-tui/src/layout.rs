@@ -514,6 +514,7 @@ pub struct WorkspaceLayout {
     pub sidebar_max_pct: f32,
     pub center_split_ratio: f32,
     pub logs_visible: bool,
+    pub logs_height: u16,
     pub terminal_size: (u16, u16),
     pub tab_bar_height: u16,
     pub status_bar_height: u16,
@@ -528,6 +529,7 @@ impl Default for WorkspaceLayout {
             sidebar_max_pct: 0.42,
             center_split_ratio: 0.42,
             logs_visible: false,
+            logs_height: 6,
             terminal_size: (80, 24),
             tab_bar_height: 2,
             status_bar_height: 3,
@@ -582,6 +584,14 @@ impl WorkspaceLayout {
     pub fn resize_center_split(&mut self, delta: f32) {
         let new_ratio = self.center_split_ratio + delta;
         self.center_split_ratio = new_ratio.clamp(0.2, 0.8);
+    }
+
+    pub fn resize_logs(&mut self, delta: i16) {
+        let (_, term_height) = self.terminal_size;
+        let max_logs = (term_height / 3).max(3);
+        self.logs_height = (self.logs_height as i16 + delta)
+            .max(3)
+            .min(max_logs as i16) as u16;
     }
 
     pub fn calculate(&self) -> WorkspaceRects {
